@@ -28,6 +28,14 @@ class TaskType(Enum):
     DIARIZATION = "diarization"    # 说话人分离
     COMPREHENSIVE = "comprehensive" # 综合处理
     BATCH = "batch"                # 批量处理
+    
+    # 流水线任务类型
+    PREPROCESSING = "preprocessing"  # 音频预处理
+    VAD = "vad"                     # 语音活动检测
+    SPEAKER_EMBEDDING = "speaker_embedding"      # 声纹特征提取
+    SPEAKER_IDENTIFICATION = "speaker_identification"  # 声纹识别
+    SPEAKER_DIARIZATION = "speaker_diarization"  # 说话人分离
+    POSTPROCESSING = "postprocessing"  # 后处理
 
 
 class TaskPriority(Enum):

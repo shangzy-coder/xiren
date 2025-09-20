@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import logging
 
-from app.api import asr, speaker, comprehensive, queue_example
+from app.api import asr, speaker, comprehensive, queue_example, pipeline
 from app.config import settings
 from app.core.queue import get_queue_manager, shutdown_queue_manager
 from app.core.request_manager import get_request_manager
@@ -37,6 +37,7 @@ app.add_middleware(
 app.include_router(asr.router, prefix="/api/v1/asr", tags=["语音识别"])
 app.include_router(speaker.router, prefix="/api/v1/speaker", tags=["声纹识别"])
 app.include_router(comprehensive.router, prefix="/api/v1", tags=["综合处理"])
+app.include_router(pipeline.router, prefix="/api/v1/pipeline", tags=["语音处理流水线"])
 app.include_router(queue_example.router, prefix="/api/v1/queue", tags=["队列系统示例"])
 
 @app.get("/")
