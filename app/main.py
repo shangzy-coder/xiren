@@ -1,10 +1,13 @@
 """
 语音识别服务主应用入口
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 import uvicorn
 import logging
+import asyncio
+import time
 
 from app.api import asr, speaker, comprehensive, queue_example, pipeline, websocket_stream
 from app.config import settings
@@ -13,9 +16,13 @@ from app.core.request_manager import get_request_manager
 from app.core.websocket_manager import cleanup_websocket_manager
 from app.services.db import initialize_database
 
-# 配置日志
-logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL))
-logger = logging.getLogger(__name__)
+# 导入新的日志和监控模块
+from app.utils.logging_config import configure_logging, get_logger
+from app.utils.metrics import setup_instrumentator, get_metrics, metrics_collector
+
+# 配置结构化日志
+configure_logging()
+logger = get_logger(__name__)
 
 app = FastAPI(
     title="语音识别服务",
@@ -24,6 +31,11 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+# 设置Prometheus监控
+if settings.ENABLE_METRICS:
+    instrumentator = setup_instrumentator(app)
+    logger.info("Prometheus监控已启用", endpoint="/metrics")
 
 # CORS中间件配置
 app.add_middleware(
@@ -41,6 +53,68 @@ app.include_router(comprehensive.router, prefix="/api/v1", tags=["综合处理"]
 app.include_router(pipeline.router, prefix="/api/v1/pipeline", tags=["语音处理流水线"])
 app.include_router(queue_example.router, prefix="/api/v1/queue", tags=["队列系统示例"])
 app.include_router(websocket_stream.router, prefix="/api/v1/websocket", tags=["WebSocket实时通信"])
+
+# 自定义监控端点
+@app.get("/metrics", response_class=PlainTextResponse, tags=["监控"])
+async def metrics_endpoint():
+    """Prometheus指标端点"""
+    return get_metrics()
+
+@app.middleware("http")
+async def logging_middleware(request: Request, call_next):
+    """请求日志中间件"""
+    start_time = time.time()
+    
+    # 记录请求开始
+    logger.info(
+        "HTTP请求开始",
+        method=request.method,
+        url=str(request.url),
+        client_ip=request.client.host if request.client else "unknown"
+    )
+    
+    try:
+        response = await call_next(request)
+        duration = time.time() - start_time
+        
+        # 记录响应
+        logger.info(
+            "HTTP请求完成",
+            method=request.method,
+            url=str(request.url),
+            status_code=response.status_code,
+            duration=duration
+        )
+        
+        # 记录监控指标
+        if settings.ENABLE_METRICS:
+            metrics_collector.record_api_request(
+                method=request.method,
+                endpoint=str(request.url.path),
+                status_code=response.status_code,
+                duration=duration
+            )
+        
+        return response
+        
+    except Exception as e:
+        duration = time.time() - start_time
+        
+        # 记录错误
+        logger.error(
+            "HTTP请求失败",
+            method=request.method,
+            url=str(request.url),
+            error=str(e),
+            error_type=type(e).__name__,
+            duration=duration
+        )
+        
+        # 记录错误指标
+        if settings.ENABLE_METRICS:
+            metrics_collector.record_error("http_middleware", type(e).__name__)
+        
+        raise
 
 @app.get("/")
 async def root():
@@ -80,14 +154,14 @@ async def health_check():
             "error": str(e)
         }
 
-@app.get("/metrics")
-async def get_metrics():
-    """获取系统指标"""
+@app.get("/stats")
+async def get_stats():
+    """获取系统统计信息"""
     try:
         request_manager = await get_request_manager()
         return request_manager.get_stats()
     except Exception as e:
-        logger.error(f"获取指标失败: {e}")
+        logger.error("获取统计信息失败", error=str(e))
         return {"error": str(e)}
 
 @app.on_event("startup")
@@ -114,11 +188,29 @@ async def startup_event():
         request_manager = await get_request_manager()
         logger.info("请求管理器初始化成功")
         
-        logger.info("语音识别服务启动完成")
+        # 启动系统指标更新任务
+        if settings.ENABLE_SYSTEM_METRICS:
+            asyncio.create_task(update_system_metrics_task())
+            logger.info("系统指标更新任务已启动")
+        
+        logger.info("语音识别服务启动完成", 
+                   enable_metrics=settings.ENABLE_METRICS,
+                   enable_system_metrics=settings.ENABLE_SYSTEM_METRICS)
         
     except Exception as e:
-        logger.error(f"服务启动失败: {e}")
+        logger.error("服务启动失败", error=str(e), error_type=type(e).__name__)
         raise
+
+async def update_system_metrics_task():
+    """定期更新系统指标的后台任务"""
+    while True:
+        try:
+            if settings.ENABLE_SYSTEM_METRICS:
+                metrics_collector.update_system_metrics()
+            await asyncio.sleep(settings.METRICS_UPDATE_INTERVAL)
+        except Exception as e:
+            logger.error("更新系统指标失败", error=str(e))
+            await asyncio.sleep(settings.METRICS_UPDATE_INTERVAL)
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -139,7 +231,7 @@ async def shutdown_event():
         logger.info("语音识别服务已关闭")
         
     except Exception as e:
-        logger.error(f"服务关闭过程中出现错误: {e}")
+        logger.error("服务关闭过程中出现错误", error=str(e), error_type=type(e).__name__)
 
 if __name__ == "__main__":
     uvicorn.run(

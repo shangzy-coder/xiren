@@ -18,8 +18,10 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from app.config import settings
 from app.core.model import recognize_audio, get_model_info
+from app.utils.logging_config import get_logger
+from app.utils.metrics import metrics_collector
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -191,7 +193,14 @@ class WebSocketManager:
             overlap_ratio=0.25
         )
         
-        logger.info(f"WebSocket连接已建立: {connection_id} ({client_address})")
+        # 记录监控指标
+        if settings.ENABLE_METRICS:
+            metrics_collector.record_websocket_connection('connect')
+        
+        logger.info("WebSocket连接已建立", 
+                   connection_id=connection_id, 
+                   client_address=client_address,
+                   total_connections=len(self.active_connections))
         return connection_id
     
     async def disconnect(self, connection_id: str):
@@ -209,7 +218,19 @@ class WebSocketManager:
             
         if connection_id in self.connection_stats:
             stats = self.connection_stats[connection_id]
-            logger.info(f"WebSocket连接已断开: {connection_id}, 统计: {stats.messages_received}条消息接收, {stats.messages_sent}条消息发送")
+            
+            # 计算连接持续时间并记录监控指标
+            if settings.ENABLE_METRICS:
+                connection_duration = (datetime.now() - stats.connected_at).total_seconds()
+                metrics_collector.record_websocket_connection('disconnect')
+                metrics_collector.record_websocket_connection_duration(connection_duration)
+            
+            logger.info("WebSocket连接已断开", 
+                       connection_id=connection_id,
+                       messages_received=stats.messages_received,
+                       messages_sent=stats.messages_sent,
+                       connection_duration=(datetime.now() - stats.connected_at).total_seconds(),
+                       remaining_connections=len(self.active_connections) - 1)
             del self.connection_stats[connection_id]
             
         if connection_id in self.connection_buffers:
@@ -228,6 +249,11 @@ class WebSocketManager:
             # 更新统计
             if connection_id in self.connection_stats:
                 self.connection_stats[connection_id].add_sent_message(len(message_str))
+            
+            # 记录监控指标
+            if settings.ENABLE_METRICS:
+                message_type = message.get('type', 'unknown')
+                metrics_collector.record_websocket_message('outbound', message_type)
             
             return True
         except Exception as e:

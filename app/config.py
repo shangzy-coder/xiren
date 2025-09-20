@@ -57,5 +57,12 @@ class Settings:
     
     # 日志配置
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")  # development, production
+    
+    # 监控配置
+    ENABLE_METRICS: bool = os.getenv("ENABLE_METRICS", "true").lower() == "true"
+    METRICS_PORT: int = int(os.getenv("METRICS_PORT", "8001"))
+    ENABLE_SYSTEM_METRICS: bool = os.getenv("ENABLE_SYSTEM_METRICS", "true").lower() == "true"
+    METRICS_UPDATE_INTERVAL: int = int(os.getenv("METRICS_UPDATE_INTERVAL", "30"))  # 秒
 
 settings = Settings()
