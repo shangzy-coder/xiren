@@ -6,8 +6,11 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import logging
 
-from app.api import asr, speaker, comprehensive
+from app.api import asr, speaker, comprehensive, queue_example
 from app.config import settings
+from app.core.queue import get_queue_manager, shutdown_queue_manager
+from app.core.request_manager import get_request_manager
+from app.services.db import initialize_database
 
 # 配置日志
 logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL))
@@ -34,6 +37,7 @@ app.add_middleware(
 app.include_router(asr.router, prefix="/api/v1/asr", tags=["语音识别"])
 app.include_router(speaker.router, prefix="/api/v1/speaker", tags=["声纹识别"])
 app.include_router(comprehensive.router, prefix="/api/v1", tags=["综合处理"])
+app.include_router(queue_example.router, prefix="/api/v1/queue", tags=["队列系统示例"])
 
 @app.get("/")
 async def root():
@@ -47,26 +51,87 @@ async def root():
 @app.get("/health")
 async def health_check():
     """详细健康检查"""
-    return {
-        "status": "healthy",
-        "service": "speech-recognition-service",
-        "version": "0.1.0",
-        "models_dir": settings.MODELS_DIR
-    }
+    try:
+        # 获取请求管理器状态
+        request_manager = await get_request_manager()
+        health_status = request_manager.get_health_status()
+        
+        return {
+            "status": health_status["status"],
+            "service": "speech-recognition-service", 
+            "version": "0.1.0",
+            "models_dir": settings.MODELS_DIR,
+            "queue_health": health_status,
+            "concurrent_config": {
+                "max_workers": settings.THREAD_POOL_SIZE,
+                "max_queue_size": settings.MAX_QUEUE_SIZE,
+                "max_concurrent_requests": settings.MAX_CONCURRENT_REQUESTS
+            }
+        }
+    except Exception as e:
+        logger.error(f"健康检查失败: {e}")
+        return {
+            "status": "unhealthy",
+            "service": "speech-recognition-service",
+            "version": "0.1.0",
+            "error": str(e)
+        }
+
+@app.get("/metrics")
+async def get_metrics():
+    """获取系统指标"""
+    try:
+        request_manager = await get_request_manager()
+        return request_manager.get_stats()
+    except Exception as e:
+        logger.error(f"获取指标失败: {e}")
+        return {"error": str(e)}
 
 @app.on_event("startup")
 async def startup_event():
     """应用启动时的初始化"""
     logger.info("语音识别服务启动中...")
-    # TODO: 初始化模型、数据库连接等
-    logger.info("语音识别服务启动完成")
+    
+    try:
+        # 初始化数据库
+        logger.info("正在初始化数据库...")
+        db_service = await initialize_database()
+        if db_service:
+            logger.info("数据库初始化成功")
+        else:
+            logger.warning("数据库初始化失败，服务将以降级模式运行")
+        
+        # 初始化队列管理器
+        logger.info("正在初始化队列管理器...")
+        queue_manager = await get_queue_manager()
+        logger.info("队列管理器初始化成功")
+        
+        # 初始化请求管理器
+        logger.info("正在初始化请求管理器...")
+        request_manager = await get_request_manager()
+        logger.info("请求管理器初始化成功")
+        
+        logger.info("语音识别服务启动完成")
+        
+    except Exception as e:
+        logger.error(f"服务启动失败: {e}")
+        raise
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """应用关闭时的清理"""
     logger.info("语音识别服务正在关闭...")
-    # TODO: 清理资源
-    logger.info("语音识别服务已关闭")
+    
+    try:
+        # 关闭队列管理器
+        logger.info("正在关闭队列管理器...")
+        await shutdown_queue_manager()
+        logger.info("队列管理器已关闭")
+        
+        logger.info("语音识别服务已关闭")
+        
+    except Exception as e:
+        logger.error(f"服务关闭过程中出现错误: {e}")
 
 if __name__ == "__main__":
     uvicorn.run(

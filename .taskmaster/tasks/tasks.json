@@ -76,7 +76,7 @@
         "id": 7,
         "title": "构建并发处理系统",
         "description": "实现异步队列和并发处理机制",
-        "status": "pending",
+        "status": "done",
         "priority": "medium",
         "dependencies": [
           4
@@ -127,7 +127,7 @@
       "description": "语音识别服务任务列表",
       "totalTasks": 10,
       "created": "2025-09-20T11:45:00.930Z",
-      "updated": "2025-09-20T13:08:42.332Z"
+      "updated": "2025-09-20T13:21:00.902Z"
     }
   }
 }

@@ -36,6 +36,14 @@ class Settings:
     MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "4"))
     QUEUE_SIZE: int = int(os.getenv("QUEUE_SIZE", "100"))
     
+    # 并发处理配置
+    THREAD_POOL_SIZE: int = int(os.getenv("THREAD_POOL_SIZE", "8"))
+    MAX_QUEUE_SIZE: int = int(os.getenv("MAX_QUEUE_SIZE", "1000"))
+    ENABLE_QUEUE_METRICS: bool = os.getenv("ENABLE_QUEUE_METRICS", "true").lower() == "true"
+    TASK_TIMEOUT: int = int(os.getenv("TASK_TIMEOUT", "300"))  # 5分钟
+    MAX_CONCURRENT_REQUESTS: int = int(os.getenv("MAX_CONCURRENT_REQUESTS", "50"))
+    BATCH_SIZE_LIMIT: int = int(os.getenv("BATCH_SIZE_LIMIT", "10"))
+    
     # 设备配置
     DEVICE_TYPE: str = os.getenv("DEVICE_TYPE", "auto")  # auto, cpu, gpu
     
