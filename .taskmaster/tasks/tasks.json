@@ -5,7 +5,7 @@
         "id": 1,
         "title": "搭建项目基础架构",
         "description": "创建 FastAPI 项目结构、依赖管理、Docker 配置",
-        "status": "pending",
+        "status": "done",
         "priority": "high",
         "dependencies": [],
         "details": "使用 Poetry 管理依赖，创建 src/ 目录结构，配置 Docker 容器化，设置基本的 FastAPI 应用",
@@ -15,9 +15,11 @@
         "id": 2,
         "title": "集成 Sherpa-ONNX 语音识别",
         "description": "封装 Sherpa-ONNX 模型加载和推理功能",
-        "status": "pending",
+        "status": "done",
         "priority": "high",
-        "dependencies": [1],
+        "dependencies": [
+          1
+        ],
         "details": "在 core/model.py 中实现 load_model() 和 infer() 方法，支持实时语音转文字",
         "testStrategy": "测试音频文件输入，验证识别准确率"
       },
@@ -27,7 +29,9 @@
         "description": "集成声纹识别模型，实现说话人识别",
         "status": "pending",
         "priority": "high",
-        "dependencies": [2],
+        "dependencies": [
+          2
+        ],
         "details": "使用 pyannote-audio，实现声纹提取和匹配，支持多说话人场景",
         "testStrategy": "测试不同说话人的音频，验证识别准确性"
       },
@@ -37,7 +41,9 @@
         "description": "设计语音识别和声纹识别的 API 端点",
         "status": "pending",
         "priority": "medium",
-        "dependencies": [3],
+        "dependencies": [
+          3
+        ],
         "details": "实现 /transcribe 和 /speaker-recognition 端点，支持文件上传和实时流",
         "testStrategy": "使用 Postman 测试所有 API 端点"
       },
@@ -47,7 +53,9 @@
         "description": "配置数据库连接，设计表结构",
         "status": "pending",
         "priority": "medium",
-        "dependencies": [1],
+        "dependencies": [
+          1
+        ],
         "details": "使用 SQLAlchemy ORM，设计识别记录、用户、声纹特征等表",
         "testStrategy": "验证数据库连接和基本 CRUD 操作"
       },
@@ -57,7 +65,10 @@
         "description": "使用 pgvector 扩展存储和检索声纹向量",
         "status": "pending",
         "priority": "medium",
-        "dependencies": [5, 3],
+        "dependencies": [
+          5,
+          3
+        ],
         "details": "在 core/speaker_pool.py 中实现声纹向量的存储、相似度搜索",
         "testStrategy": "测试声纹向量存储和相似度匹配准确性"
       },
@@ -67,7 +78,9 @@
         "description": "实现异步队列和并发处理机制",
         "status": "pending",
         "priority": "medium",
-        "dependencies": [4],
+        "dependencies": [
+          4
+        ],
         "details": "使用 asyncio.Queue 和 ThreadPoolExecutor 管理并发请求",
         "testStrategy": "压力测试并发处理能力和响应时间"
       },
@@ -77,7 +90,9 @@
         "description": "支持实时语音流处理和识别结果推送",
         "status": "pending",
         "priority": "low",
-        "dependencies": [7],
+        "dependencies": [
+          7
+        ],
         "details": "实现 WebSocket 端点，支持音频流接收和结果实时返回",
         "testStrategy": "测试实时音频流处理和延迟"
       },
@@ -87,7 +102,9 @@
         "description": "集成日志系统和性能监控",
         "status": "pending",
         "priority": "low",
-        "dependencies": [4],
+        "dependencies": [
+          4
+        ],
         "details": "使用 structlog 记录日志，集成 Prometheus 指标监控",
         "testStrategy": "验证日志记录完整性和监控指标准确性"
       },
@@ -97,7 +114,10 @@
         "description": "完善单元测试、集成测试和 API 文档",
         "status": "pending",
         "priority": "low",
-        "dependencies": [8, 9],
+        "dependencies": [
+          8,
+          9
+        ],
         "details": "使用 pytest 编写测试，生成 OpenAPI 文档",
         "testStrategy": "达到 80% 以上测试覆盖率"
       }
@@ -105,7 +125,9 @@
     "metadata": {
       "createdAt": "2025-09-20T19:23:41+08:00",
       "description": "语音识别服务任务列表",
-      "totalTasks": 10
+      "totalTasks": 10,
+      "created": "2025-09-20T11:45:00.930Z",
+      "updated": "2025-09-20T12:17:19.991Z"
     }
   }
 }
