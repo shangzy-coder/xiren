@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket 语音识别测试客户端</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .control-panel {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s;
+        }
+        
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background-color: #0056b3;
+        }
+        
+        .btn-success {
+            background-color: #28a745;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background-color: #1e7e34;
+        }
+        
+        .btn-danger {
+            background-color: #dc3545;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+        
+        .btn-warning {
+            background-color: #ffc107;
+            color: #212529;
+        }
+        
+        .btn-warning:hover {
+            background-color: #e0a800;
+        }
+        
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+        
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status.connecting {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        
+        .config-panel {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        
+        .config-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+            gap: 10px;
+        }
+        
+        .config-row label {
+            min-width: 120px;
+            font-weight: bold;
+        }
+        
+        .config-row input {
+            flex: 1;
+            padding: 5px 10px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+        
+        .log-container {
+            background-color: #1e1e1e;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 5px;
+            height: 400px;
+            overflow-y: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 2px 0;
+        }
+        
+        .log-entry.info {
+            color: #a6e22e;
+        }
+        
+        .log-entry.error {
+            color: #f92672;
+        }
+        
+        .log-entry.warning {
+            color: #fd971f;
+        }
+        
+        .log-entry.result {
+            color: #66d9ef;
+            font-weight: bold;
+        }
+        
+        .audio-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .recording-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #dc3545;
+            animation: pulse 1s infinite;
+            display: none;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .file-input {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ WebSocket 语音识别测试客户端</h1>
+        
+        <!-- 连接状态 -->
+        <div id="status" class="status disconnected">
+            🔴 未连接
+        </div>
+        
+        <!-- 配置面板 -->
+        <div class="config-panel">
+            <h3>连接配置</h3>
+            <div class="config-row">
+                <label>服务器地址:</label>
+                <input type="text" id="serverUrl" value="ws://localhost:8002/api/v1/websocket/stream">
+            </div>
+        </div>
+        
+        <!-- 控制面板 -->
+        <div class="control-panel">
+            <button id="connectBtn" class="btn-primary">🔌 连接</button>
+            <button id="disconnectBtn" class="btn-danger" disabled>🔌 断开</button>
+            <button id="clearLogBtn" class="btn-warning">🗑️ 清空日志</button>
+        </div>
+        
+        <!-- 音频控制 -->
+        <div class="audio-controls">
+            <button id="startRecordBtn" class="btn-success" disabled>🎤 开始录音</button>
+            <button id="stopRecordBtn" class="btn-danger" disabled>⏹️ 停止录音</button>
+            <div id="recordingIndicator" class="recording-indicator"></div>
+            <span id="recordingStatus"></span>
+        </div>
+        
+        <!-- 文件上传测试 -->
+        <div class="file-input">
+            <input type="file" id="audioFile" accept="audio/*">
+            <button id="sendFileBtn" class="btn-primary" disabled>📤 发送音频文件</button>
+        </div>
+        
+        <!-- 测试按钮 -->
+        <div class="control-panel">
+            <button id="testSyntheticBtn" class="btn-success" disabled>🎵 测试合成音频</button>
+            <button id="endSessionBtn" class="btn-warning" disabled>🏁 结束会话</button>
+        </div>
+        
+        <!-- 日志显示 -->
+        <div id="logContainer" class="log-container">
+            <div class="log-entry info">准备就绪，点击连接按钮开始测试...</div>
+        </div>
+    </div>
+
+    <script>
+        class WebSocketTestClient {
+            constructor() {
+                this.websocket = null;
+                this.isRecording = false;
+                this.mediaRecorder = null;
+                this.audioChunks = [];
+                this.audioContext = null;
+                
+                this.initializeElements();
+                this.bindEvents();
+            }
+            
+            initializeElements() {
+                this.statusEl = document.getElementById('status');
+                this.serverUrlEl = document.getElementById('serverUrl');
+                this.connectBtn = document.getElementById('connectBtn');
+                this.disconnectBtn = document.getElementById('disconnectBtn');
+                this.clearLogBtn = document.getElementById('clearLogBtn');
+                this.startRecordBtn = document.getElementById('startRecordBtn');
+                this.stopRecordBtn = document.getElementById('stopRecordBtn');
+                this.recordingIndicator = document.getElementById('recordingIndicator');
+                this.recordingStatus = document.getElementById('recordingStatus');
+                this.audioFile = document.getElementById('audioFile');
+                this.sendFileBtn = document.getElementById('sendFileBtn');
+                this.testSyntheticBtn = document.getElementById('testSyntheticBtn');
+                this.endSessionBtn = document.getElementById('endSessionBtn');
+                this.logContainer = document.getElementById('logContainer');
+            }
+            
+            bindEvents() {
+                this.connectBtn.addEventListener('click', () => this.connect());
+                this.disconnectBtn.addEventListener('click', () => this.disconnect());
+                this.clearLogBtn.addEventListener('click', () => this.clearLog());
+                this.startRecordBtn.addEventListener('click', () => this.startRecording());
+                this.stopRecordBtn.addEventListener('click', () => this.stopRecording());
+                this.sendFileBtn.addEventListener('click', () => this.sendAudioFile());
+                this.testSyntheticBtn.addEventListener('click', () => this.testSyntheticAudio());
+                this.endSessionBtn.addEventListener('click', () => this.endSession());
+            }
+            
+            log(message, type = 'info') {
+                const timestamp = new Date().toLocaleTimeString();
+                const logEntry = document.createElement('div');
+                logEntry.className = `log-entry ${type}`;
+                logEntry.textContent = `[${timestamp}] ${message}`;
+                this.logContainer.appendChild(logEntry);
+                this.logContainer.scrollTop = this.logContainer.scrollHeight;
+            }
+            
+            clearLog() {
+                this.logContainer.innerHTML = '';
+                this.log('日志已清空');
+            }
+            
+            updateStatus(status, message) {
+                this.statusEl.className = `status ${status}`;
+                this.statusEl.textContent = message;
+            }
+            
+            updateButtonStates(connected) {
+                this.connectBtn.disabled = connected;
+                this.disconnectBtn.disabled = !connected;
+                this.startRecordBtn.disabled = !connected;
+                this.sendFileBtn.disabled = !connected;
+                this.testSyntheticBtn.disabled = !connected;
+                this.endSessionBtn.disabled = !connected;
+            }
+            
+            async connect() {
+                const serverUrl = this.serverUrlEl.value.trim();
+                if (!serverUrl) {
+                    this.log('请输入服务器地址', 'error');
+                    return;
+                }
+                
+                try {
+                    this.updateStatus('connecting', '🟡 连接中...');
+                    this.log(`正在连接到 ${serverUrl}`);
+                    
+                    this.websocket = new WebSocket(serverUrl);
+                    
+                    this.websocket.onopen = () => {
+                        this.updateStatus('connected', '🟢 已连接');
+                        this.log('WebSocket连接已建立', 'info');
+                        this.updateButtonStates(true);
+                    };
+                    
+                    this.websocket.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            this.handleMessage(data);
+                        } catch (e) {
+                            this.log(`JSON解析错误: ${e.message}`, 'error');
+                        }
+                    };
+                    
+                    this.websocket.onclose = () => {
+                        this.updateStatus('disconnected', '🔴 未连接');
+                        this.log('WebSocket连接已关闭', 'warning');
+                        this.updateButtonStates(false);
+                        this.websocket = null;
+                    };
+                    
+                    this.websocket.onerror = (error) => {
+                        this.log(`WebSocket错误: ${error}`, 'error');
+                    };
+                    
+                } catch (error) {
+                    this.updateStatus('disconnected', '🔴 连接失败');
+                    this.log(`连接失败: ${error.message}`, 'error');
+                }
+            }
+            
+            disconnect() {
+                if (this.websocket) {
+                    this.websocket.close();
+                }
+            }
+            
+            handleMessage(data) {
+                const messageType = data.type || 'unknown';
+                
+                switch (messageType) {
+                    case 'transcription':
+                        const text = data.text || '';
+                        const timestamp = data.timestamp || 0;
+                        const speaker = data.speaker || 'unknown';
+                        const language = data.language || 'unknown';
+                        const emotion = data.emotion || 'unknown';
+                        
+                        this.log(`🎯 识别结果: ${text}`, 'result');
+                        this.log(`   时间戳: ${timestamp.toFixed(2)}s, 说话人: ${speaker}`, 'result');
+                        this.log(`   语言: ${language}, 情感: ${emotion}`, 'result');
+                        break;
+                        
+                    case 'error':
+                        const errorMsg = data.message || '未知错误';
+                        this.log(`❌ 服务器错误: ${errorMsg}`, 'error');
+                        break;
+                        
+                    case 'end':
+                        const endMsg = data.message || '会话结束';
+                        this.log(`🏁 ${endMsg}`, 'info');
+                        break;
+                        
+                    default:
+                        this.log(`❓ 未知消息类型: ${messageType}`, 'warning');
+                        this.log(`   数据: ${JSON.stringify(data)}`, 'warning');
+                }
+            }
+            
+            sendMessage(message) {
+                if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
+                    this.log('WebSocket未连接', 'error');
+                    return false;
+                }
+                
+                try {
+                    this.websocket.send(JSON.stringify(message));
+                    return true;
+                } catch (error) {
+                    this.log(`发送消息失败: ${error.message}`, 'error');
+                    return false;
+                }
+            }
+            
+            async startRecording() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: {
+                            sampleRate: 16000,
+                            channelCount: 1,
+                            echoCancellation: true,
+                            noiseSuppression: true
+                        } 
+                    });
+                    
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                        sampleRate: 16000
+                    });
+                    
+                    const source = this.audioContext.createMediaStreamSource(stream);
+                    const processor = this.audioContext.createScriptProcessor(4096, 1, 1);
+                    
+                    processor.onaudioprocess = (e) => {
+                        if (this.isRecording) {
+                            const inputData = e.inputBuffer.getChannelData(0);
+                            const audioData = new Float32Array(inputData);
+                            this.sendAudioChunk(audioData);
+                        }
+                    };
+                    
+                    source.connect(processor);
+                    processor.connect(this.audioContext.destination);
+                    
+                    this.mediaRecorder = { stream, source, processor };
+                    this.isRecording = true;
+                    
+                    this.startRecordBtn.disabled = true;
+                    this.stopRecordBtn.disabled = false;
+                    this.recordingIndicator.style.display = 'block';
+                    this.recordingStatus.textContent = '正在录音...';
+                    
+                    this.log('🎤 开始录音', 'info');
+                    
+                } catch (error) {
+                    this.log(`录音失败: ${error.message}`, 'error');
+                }
+            }
+            
+            stopRecording() {
+                if (this.mediaRecorder && this.isRecording) {
+                    this.isRecording = false;
+                    
+                    this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                    this.mediaRecorder.processor.disconnect();
+                    this.mediaRecorder.source.disconnect();
+                    
+                    if (this.audioContext) {
+                        this.audioContext.close();
+                    }
+                    
+                    this.startRecordBtn.disabled = false;
+                    this.stopRecordBtn.disabled = true;
+                    this.recordingIndicator.style.display = 'none';
+                    this.recordingStatus.textContent = '';
+                    
+                    this.log('⏹️ 录音已停止', 'info');
+                    
+                    // 发送结束信号
+                    this.endSession();
+                }
+            }
+            
+            sendAudioChunk(audioData) {
+                // 将Float32Array转换为base64
+                const buffer = new ArrayBuffer(audioData.length * 4);
+                const view = new Float32Array(buffer);
+                view.set(audioData);
+                
+                const bytes = new Uint8Array(buffer);
+                const binary = String.fromCharCode.apply(null, bytes);
+                const base64 = btoa(binary);
+                
+                const message = {
+                    type: 'audio',
+                    data: base64
+                };
+                
+                this.sendMessage(message);
+            }
+            
+            async sendAudioFile() {
+                const file = this.audioFile.files[0];
+                if (!file) {
+                    this.log('请选择音频文件', 'error');
+                    return;
+                }
+                
+                this.log(`📁 正在处理音频文件: ${file.name}`, 'info');
+                
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                    
+                    // 转换为16kHz单声道
+                    const sampleRate = 16000;
+                    const duration = audioBuffer.duration;
+                    const numSamples = Math.floor(duration * sampleRate);
+                    const audioData = new Float32Array(numSamples);
+                    
+                    // 重采样和混音到单声道
+                    const originalData = audioBuffer.getChannelData(0);
+                    for (let i = 0; i < numSamples; i++) {
+                        const originalIndex = Math.floor(i * audioBuffer.sampleRate / sampleRate);
+                        audioData[i] = originalData[Math.min(originalIndex, originalData.length - 1)];
+                    }
+                    
+                    this.log(`✅ 音频文件处理完成: ${duration.toFixed(2)}秒, ${numSamples}样本`, 'info');
+                    
+                    // 分块发送
+                    const chunkSize = sampleRate * 2; // 2秒块
+                    const totalChunks = Math.ceil(numSamples / chunkSize);
+                    
+                    this.log(`📦 将音频分为 ${totalChunks} 个块发送`, 'info');
+                    
+                    for (let i = 0; i < totalChunks; i++) {
+                        const start = i * chunkSize;
+                        const end = Math.min(start + chunkSize, numSamples);
+                        const chunk = audioData.slice(start, end);
+                        
+                        this.sendAudioChunk(chunk);
+                        
+                        // 等待一段时间模拟实时发送
+                        await new Promise(resolve => setTimeout(resolve, 1600));
+                    }
+                    
+                    this.log('📤 音频文件发送完成', 'info');
+                    
+                    // 等待一段时间后发送结束信号
+                    setTimeout(() => {
+                        this.endSession();
+                    }, 2000);
+                    
+                } catch (error) {
+                    this.log(`音频文件处理失败: ${error.message}`, 'error');
+                }
+            }
+            
+            async testSyntheticAudio() {
+                this.log('🎵 开始发送合成音频测试数据', 'info');
+                
+                const sampleRate = 16000;
+                const duration = 5; // 5秒
+                const frequency1 = 440; // A4
+                const frequency2 = 554.37; // C#5
+                
+                const totalSamples = duration * sampleRate;
+                const chunkSize = sampleRate * 2; // 2秒块
+                const totalChunks = Math.ceil(totalSamples / chunkSize);
+                
+                for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                    const chunkStart = chunkIndex * chunkSize;
+                    const chunkEnd = Math.min(chunkStart + chunkSize, totalSamples);
+                    const chunkLength = chunkEnd - chunkStart;
+                    
+                    const audioChunk = new Float32Array(chunkLength);
+                    
+                    for (let i = 0; i < chunkLength; i++) {
+                        const t = (chunkStart + i) / sampleRate;
+                        audioChunk[i] = (
+                            Math.sin(2 * Math.PI * frequency1 * t) * 0.3 +
+                            Math.sin(2 * Math.PI * frequency2 * t) * 0.2
+                        );
+                    }
+                    
+                    this.sendAudioChunk(audioChunk);
+                    this.log(`📤 发送第 ${chunkIndex + 1}/${totalChunks} 块音频数据`, 'info');
+                    
+                    // 等待模拟实时发送
+                    await new Promise(resolve => setTimeout(resolve, 1600));
+                }
+                
+                this.log('🎵 合成音频发送完成', 'info');
+                
+                // 等待一段时间后发送结束信号
+                setTimeout(() => {
+                    this.endSession();
+                }, 2000);
+            }
+            
+            endSession() {
+                const message = { type: 'end' };
+                if (this.sendMessage(message)) {
+                    this.log('🔚 已发送结束信号', 'info');
+                }
+            }
+        }
+        
+        // 初始化客户端
+        document.addEventListener('DOMContentLoaded', () => {
+            new WebSocketTestClient();
+        });
+    </script>
+</body>
+</html>

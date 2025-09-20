@@ -160,8 +160,11 @@ threshold: float = null
 ### POST /api/v1/asr/batch-transcribe
 批量音频文件识别
 
-### WebSocket /api/v1/asr/stream
-实时音频流识别
+### WebSocket /api/v1/asr/stream (传统端点)
+实时音频流识别 (基础版本)
+
+### WebSocket /api/v1/websocket/stream (增强端点)
+增强的实时音频流识别，包含连接管理、统计监控和心跳检测
 
 **WebSocket协议**:
 ```javascript
@@ -182,6 +185,17 @@ threshold: float = null
 // 结束会话
 {
   "type": "end"
+}
+
+// 心跳检测
+{
+  "type": "ping",
+  "timestamp": 1234567890.123
+}
+
+// 请求统计信息
+{
+  "type": "get_stats"
 }
 ```
 
@@ -218,6 +232,14 @@ threshold: float = null
 
 ### GET /api/v1/sessions
 列出处理会话
+
+## 6. WebSocket管理接口
+
+### GET /api/v1/websocket/stream/health
+WebSocket服务健康检查
+
+### GET /api/v1/websocket/stream/stats
+获取WebSocket连接统计信息
 
 ## 状态码说明
 
