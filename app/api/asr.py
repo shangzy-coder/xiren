@@ -19,6 +19,8 @@ from app.core.model import (
     register_speaker,
     get_model_info
 )
+from app.core.request_manager import get_request_manager, TaskPriority
+from app.core.queue import TaskType
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -30,6 +32,14 @@ class ASRResponse(BaseModel):
     message: str = ""
     results: list = []
     statistics: Dict[str, Any] = {}
+
+
+class ASRAsyncResponse(BaseModel):
+    """ASR异步处理响应模型"""
+    success: bool
+    task_id: str
+    message: str
+    estimated_completion_time: Optional[float] = None
 
 
 class ASRRequest(BaseModel):
@@ -186,6 +196,221 @@ async def transcribe_audio(
         )
 
 
+@router.post("/transcribe-async", response_model=ASRAsyncResponse)
+async def transcribe_audio_async(
+    file: UploadFile = File(..., description="音频文件"),
+    enable_vad: bool = Form(default=True, description="是否启用语音活动检测"),
+    enable_speaker_id: bool = Form(default=False, description="是否启用声纹识别"),
+    sample_rate: Optional[int] = Form(default=None, description="音频采样率"),
+    priority: str = Form(default="normal", description="任务优先级: low, normal, high, urgent")
+):
+    """
+    异步音频识别接口
+    
+    将语音识别任务提交到队列系统，立即返回任务ID，可通过任务ID查询结果
+    """
+    try:
+        # 检查模型状态
+        if not get_model_info()["initialized"]:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="ASR模型未初始化，请先调用 /initialize 接口"
+            )
+        
+        # 验证音频文件
+        if not file.content_type or not file.content_type.startswith('audio/'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="上传的文件不是音频格式"
+            )
+        
+        # 解析优先级
+        priority_map = {
+            "low": TaskPriority.LOW,
+            "normal": TaskPriority.NORMAL,
+            "high": TaskPriority.HIGH,
+            "urgent": TaskPriority.URGENT
+        }
+        task_priority = priority_map.get(priority.lower(), TaskPriority.NORMAL)
+        
+        # 读取音频数据
+        audio_data = await file.read()
+        
+        # 估算处理时间（基于文件大小）
+        estimated_time = len(audio_data) / (1024 * 1024) * 2  # 简单估算：2秒/MB
+        
+        # 获取请求管理器
+        request_manager = await get_request_manager()
+        
+        # 提交异步ASR任务
+        task_id = await request_manager.submit_asr_request(
+            func=_process_asr_task,
+            args=(audio_data, file.filename, enable_vad, enable_speaker_id, sample_rate),
+            priority=task_priority,
+            timeout=settings.TASK_TIMEOUT
+        )
+        
+        logger.info(f"异步ASR任务已提交: {task_id}, 文件: {file.filename}")
+        
+        return ASRAsyncResponse(
+            success=True,
+            task_id=task_id,
+            message=f"ASR任务已提交到队列，优先级: {priority}",
+            estimated_completion_time=estimated_time
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"提交异步ASR任务失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"提交任务失败: {str(e)}"
+        )
+
+
+async def _process_asr_task(audio_data: bytes, 
+                          filename: str,
+                          enable_vad: bool = True,
+                          enable_speaker_id: bool = False,
+                          sample_rate: Optional[int] = None) -> Dict[str, Any]:
+    """
+    异步处理ASR任务的内部函数
+    
+    Args:
+        audio_data: 音频数据
+        filename: 文件名
+        enable_vad: 是否启用VAD
+        enable_speaker_id: 是否启用声纹识别
+        sample_rate: 采样率
+        
+    Returns:
+        识别结果
+    """
+    try:
+        # 音频预处理
+        from app.utils.audio import AudioProcessor
+        audio_processor = AudioProcessor()
+        processed_audio = await audio_processor.convert_and_resample(
+            audio_data, 
+            output_sample_rate=sample_rate or settings.SAMPLE_RATE
+        )
+        
+        # 转换为numpy数组
+        audio_array = np.frombuffer(processed_audio, dtype=np.float32)
+        
+        # 调用语音识别
+        result = await recognize_audio(
+            audio_data=audio_array,
+            sample_rate=sample_rate or settings.SAMPLE_RATE,
+            enable_vad=enable_vad,
+            enable_speaker_id=enable_speaker_id
+        )
+        
+        # 添加文件信息
+        result["filename"] = filename
+        result["file_size"] = len(audio_data)
+        result["duration"] = len(audio_array) / (sample_rate or settings.SAMPLE_RATE)
+        
+        if result["success"]:
+            logger.info(f"异步ASR任务完成: {filename}, 识别出 {len(result.get('results', []))} 个语音段落")
+        else:
+            logger.error(f"异步ASR任务失败: {filename}, 错误: {result.get('error', 'Unknown error')}")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"处理异步ASR任务失败: {filename}, 错误: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "filename": filename,
+            "results": [],
+            "statistics": {}
+        }
+
+
+@router.get("/task/{task_id}/status")
+async def get_asr_task_status(task_id: str):
+    """获取ASR任务状态"""
+    try:
+        request_manager = await get_request_manager()
+        result = await request_manager.get_request_status(task_id)
+        
+        if not result:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        
+        return {
+            "task_id": task_id,
+            "status": result.status.value,
+            "result": result.result,
+            "error": result.error,
+            "execution_time": result.execution_time,
+            "created_at": result.created_at,
+            "started_at": result.started_at,
+            "completed_at": result.completed_at
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取ASR任务状态失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取状态失败: {str(e)}")
+
+
+@router.get("/task/{task_id}/result")
+async def get_asr_task_result(task_id: str, timeout: float = 30.0):
+    """等待并获取ASR任务结果"""
+    try:
+        request_manager = await get_request_manager()
+        result = await request_manager.get_request_result(task_id, timeout)
+        
+        if result.status.value == 'completed':
+            return {
+                "success": True,
+                "task_id": task_id,
+                "result": result.result,
+                "execution_time": result.execution_time
+            }
+        elif result.status.value == 'failed':
+            raise HTTPException(
+                status_code=500, 
+                detail=f"任务执行失败: {result.error}"
+            )
+        else:
+            raise HTTPException(
+                status_code=408,
+                detail=f"任务未完成: {result.status.value}"
+            )
+            
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=408, detail="等待任务结果超时")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取ASR任务结果失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取结果失败: {str(e)}")
+
+
+@router.delete("/task/{task_id}")
+async def cancel_asr_task(task_id: str):
+    """取消ASR任务"""
+    try:
+        request_manager = await get_request_manager()
+        success = await request_manager.cancel_request(task_id)
+        
+        if success:
+            return {"success": True, "message": f"任务 {task_id} 已取消"}
+        else:
+            raise HTTPException(status_code=404, detail="任务不存在或无法取消")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"取消ASR任务失败: {e}")
+        raise HTTPException(status_code=500, detail=f"取消失败: {str(e)}")
+
+
 @router.post("/batch-transcribe", response_model=ASRResponse)
 async def batch_transcribe_audio(
     files: list[UploadFile] = File(..., description="音频文件列表"),
@@ -286,6 +511,186 @@ async def batch_transcribe_audio(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"批量音频识别失败: {str(e)}"
         )
+
+
+@router.post("/batch-transcribe-async", response_model=ASRAsyncResponse)
+async def batch_transcribe_audio_async(
+    files: list[UploadFile] = File(..., description="音频文件列表"),
+    enable_vad: bool = Form(default=True, description="是否启用语音活动检测"),
+    enable_speaker_id: bool = Form(default=False, description="是否启用声纹识别"),
+    priority: str = Form(default="low", description="任务优先级，批量任务建议使用low")
+):
+    """
+    异步批量音频识别接口
+    
+    将批量语音识别任务提交到队列系统
+    """
+    try:
+        # 检查模型状态
+        if not get_model_info()["initialized"]:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="ASR模型未初始化，请先调用 /initialize 接口"
+            )
+        
+        if len(files) > settings.BATCH_SIZE_LIMIT:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"批量处理文件数量不能超过{settings.BATCH_SIZE_LIMIT}个"
+            )
+        
+        # 解析优先级
+        priority_map = {
+            "low": TaskPriority.LOW,
+            "normal": TaskPriority.NORMAL,
+            "high": TaskPriority.HIGH,
+            "urgent": TaskPriority.URGENT
+        }
+        task_priority = priority_map.get(priority.lower(), TaskPriority.LOW)
+        
+        # 准备批量任务数据
+        batch_data = []
+        total_size = 0
+        
+        for file in files:
+            if not file.content_type or not file.content_type.startswith('audio/'):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"文件 {file.filename} 不是音频格式"
+                )
+            
+            audio_data = await file.read()
+            total_size += len(audio_data)
+            batch_data.append({
+                "audio_data": audio_data,
+                "filename": file.filename,
+                "enable_vad": enable_vad,
+                "enable_speaker_id": enable_speaker_id,
+                "sample_rate": None
+            })
+        
+        # 估算处理时间
+        estimated_time = total_size / (1024 * 1024) * 3  # 批量处理稍慢：3秒/MB
+        
+        # 获取请求管理器
+        request_manager = await get_request_manager()
+        
+        # 提交批量任务
+        task_id = await request_manager.submit_batch_request(
+            func=_process_batch_asr_task,
+            args=(batch_data,),
+            priority=task_priority,
+            timeout=settings.TASK_TIMEOUT * 2  # 批量任务超时时间更长
+        )
+        
+        logger.info(f"异步批量ASR任务已提交: {task_id}, 文件数: {len(files)}")
+        
+        return ASRAsyncResponse(
+            success=True,
+            task_id=task_id,
+            message=f"批量ASR任务已提交到队列，文件数: {len(files)}，优先级: {priority}",
+            estimated_completion_time=estimated_time
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"提交异步批量ASR任务失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"提交批量任务失败: {str(e)}"
+        )
+
+
+async def _process_batch_asr_task(batch_data: list) -> Dict[str, Any]:
+    """
+    异步处理批量ASR任务
+    
+    Args:
+        batch_data: 批量任务数据列表
+        
+    Returns:
+        批量处理结果
+    """
+    try:
+        from app.utils.audio import AudioProcessor
+        audio_processor = AudioProcessor()
+        
+        all_results = []
+        total_statistics = {
+            "total_files": len(batch_data),
+            "successful_files": 0,
+            "failed_files": 0,
+            "total_duration": 0.0,
+            "total_processing_time": 0.0
+        }
+        
+        for i, file_data in enumerate(batch_data):
+            try:
+                # 音频预处理
+                processed_audio = await audio_processor.convert_and_resample(
+                    file_data["audio_data"], 
+                    output_sample_rate=file_data["sample_rate"] or settings.SAMPLE_RATE
+                )
+                
+                # 转换为numpy数组
+                audio_array = np.frombuffer(processed_audio, dtype=np.float32)
+                
+                # 语音识别
+                result = await recognize_audio(
+                    audio_data=audio_array,
+                    sample_rate=file_data["sample_rate"] or settings.SAMPLE_RATE,
+                    enable_vad=file_data["enable_vad"],
+                    enable_speaker_id=file_data["enable_speaker_id"]
+                )
+                
+                # 添加文件信息
+                result["filename"] = file_data["filename"]
+                result["file_size"] = len(file_data["audio_data"])
+                result["duration"] = len(audio_array) / (file_data["sample_rate"] or settings.SAMPLE_RATE)
+                result["file_index"] = i
+                
+                all_results.append(result)
+                
+                if result["success"]:
+                    total_statistics["successful_files"] += 1
+                    total_statistics["total_duration"] += result["duration"]
+                    if result.get("statistics", {}).get("processing_time"):
+                        total_statistics["total_processing_time"] += result["statistics"]["processing_time"]
+                else:
+                    total_statistics["failed_files"] += 1
+                
+                logger.info(f"批量ASR任务进度: {i+1}/{len(batch_data)}, 文件: {file_data['filename']}")
+                
+            except Exception as e:
+                logger.error(f"处理文件失败: {file_data['filename']}, 错误: {e}")
+                all_results.append({
+                    "success": False,
+                    "error": str(e),
+                    "filename": file_data["filename"],
+                    "file_index": i,
+                    "results": [],
+                    "statistics": {}
+                })
+                total_statistics["failed_files"] += 1
+        
+        logger.info(f"批量ASR任务完成，成功: {total_statistics['successful_files']}, 失败: {total_statistics['failed_files']}")
+        
+        return {
+            "success": True,
+            "message": "批量音频识别完成",
+            "results": all_results,
+            "statistics": total_statistics
+        }
+        
+    except Exception as e:
+        logger.error(f"批量ASR任务处理失败: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "results": [],
+            "statistics": total_statistics
+        }
 
 
 @router.websocket("/stream")
