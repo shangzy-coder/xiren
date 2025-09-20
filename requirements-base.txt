@@ -1,3 +1,4 @@
+# 基础依赖 - CPU/GPU通用
 # Web框架
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
@@ -20,14 +21,7 @@ numpy>=1.21.0
 ffmpeg-python==0.2.0
 scipy>=1.7.0
 
-# 机器学习 (按需安装)
-# torch>=2.0.0
-# torchaudio>=2.0.0
-# 使用支持CUDA的onnxruntime
-onnxruntime-gpu>=1.22.0
-
-# 语音识别 (支持CUDA)
-sherpa-onnx>=1.12.0
+# 语音识别基础包
 soundfile>=0.12.1
 librosa>=0.10.0
 

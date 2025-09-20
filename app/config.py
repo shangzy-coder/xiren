@@ -36,6 +36,9 @@ class Settings:
     MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "4"))
     QUEUE_SIZE: int = int(os.getenv("QUEUE_SIZE", "100"))
     
+    # 设备配置
+    DEVICE_TYPE: str = os.getenv("DEVICE_TYPE", "auto")  # auto, cpu, gpu
+    
     # 声纹配置
     SPEAKER_EMBEDDING_DIM: int = int(os.getenv("SPEAKER_EMBEDDING_DIM", "512"))
     SPEAKER_SIMILARITY_THRESHOLD: float = float(os.getenv("SPEAKER_SIMILARITY_THRESHOLD", "0.75"))

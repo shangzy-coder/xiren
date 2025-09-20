@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import logging
 
-from app.api import asr, speaker
+from app.api import asr, speaker, comprehensive
 from app.config import settings
 
 # 配置日志
@@ -33,6 +33,7 @@ app.add_middleware(
 # 包含API路由
 app.include_router(asr.router, prefix="/api/v1/asr", tags=["语音识别"])
 app.include_router(speaker.router, prefix="/api/v1/speaker", tags=["声纹识别"])
+app.include_router(comprehensive.router, prefix="/api/v1", tags=["综合处理"])
 
 @app.get("/")
 async def root():

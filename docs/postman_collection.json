@@ -1,0 +1,516 @@
+{
+  "info": {
+    "name": "语音识别服务API",
+    "description": "基于Sherpa-ONNX的语音识别与声纹识别服务API测试集合",
+    "version": "1.0.0"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "健康检查",
+      "item": [
+        {
+          "name": "根路径检查",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/",
+              "host": ["{{base_url}}"],
+              "path": [""]
+            }
+          }
+        },
+        {
+          "name": "详细健康检查",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            }
+          }
+        },
+        {
+          "name": "综合服务健康检查",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/health",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "health"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "语音识别 (ASR)",
+      "item": [
+        {
+          "name": "获取ASR状态",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/asr/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "asr", "status"]
+            }
+          }
+        },
+        {
+          "name": "初始化ASR模型",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "model_type",
+                  "value": "sense_voice",
+                  "type": "text"
+                },
+                {
+                  "key": "use_gpu",
+                  "value": "false",
+                  "type": "text"
+                },
+                {
+                  "key": "enable_vad",
+                  "value": "true",
+                  "type": "text"
+                },
+                {
+                  "key": "enable_speaker_id",
+                  "value": "false",
+                  "type": "text"
+                },
+                {
+                  "key": "enable_punctuation",
+                  "value": "false",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/asr/initialize",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "asr", "initialize"]
+            }
+          }
+        },
+        {
+          "name": "离线音频识别",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "test_audio.wav"
+                },
+                {
+                  "key": "enable_vad",
+                  "value": "true",
+                  "type": "text"
+                },
+                {
+                  "key": "enable_speaker_id",
+                  "value": "false",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/asr/transcribe",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "asr", "transcribe"]
+            }
+          }
+        },
+        {
+          "name": "批量音频识别",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "files",
+                  "type": "file",
+                  "src": "test_audio1.wav"
+                },
+                {
+                  "key": "files",
+                  "type": "file", 
+                  "src": "test_audio2.wav"
+                },
+                {
+                  "key": "enable_vad",
+                  "value": "true",
+                  "type": "text"
+                },
+                {
+                  "key": "enable_speaker_id",
+                  "value": "false",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/asr/batch-transcribe",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "asr", "batch-transcribe"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "声纹识别 (Speaker)",
+      "item": [
+        {
+          "name": "获取声纹服务状态",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/speaker/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "speaker", "status"]
+            }
+          }
+        },
+        {
+          "name": "列出已注册说话人",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/speaker/speakers?limit=50&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "speaker", "speakers"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "注册说话人",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "name",
+                  "value": "张三",
+                  "type": "text"
+                },
+                {
+                  "key": "audio_file",
+                  "type": "file",
+                  "src": "speaker_zhangsan.wav"
+                },
+                {
+                  "key": "metadata",
+                  "value": "{\"age\": 30, \"gender\": \"male\", \"department\": \"技术部\"}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/speaker/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "speaker", "register"]
+            }
+          }
+        },
+        {
+          "name": "识别说话人",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "audio_file",
+                  "type": "file",
+                  "src": "test_speaker.wav"
+                },
+                {
+                  "key": "threshold",
+                  "value": "0.75",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/speaker/identify",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "speaker", "identify"]
+            }
+          }
+        },
+        {
+          "name": "说话人分离",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "audio_file",
+                  "type": "file",
+                  "src": "multi_speaker.wav"
+                },
+                {
+                  "key": "num_speakers",
+                  "value": "-1",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/speaker/diarization",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "speaker", "diarization"]
+            }
+          }
+        },
+        {
+          "name": "声纹相似度搜索",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "audio_file",
+                  "type": "file",
+                  "src": "search_speaker.wav"
+                },
+                {
+                  "key": "threshold",
+                  "value": "0.6",
+                  "type": "text"
+                },
+                {
+                  "key": "limit",
+                  "value": "5",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/speaker/search",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "speaker", "search"]
+            }
+          }
+        },
+        {
+          "name": "获取说话人详情",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/speaker/speakers/张三",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "speaker", "speakers", "张三"]
+            }
+          }
+        },
+        {
+          "name": "删除说话人",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/speaker/speakers/张三",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "speaker", "speakers", "张三"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "综合处理",
+      "item": [
+        {
+          "name": "综合音频处理",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "audio_file",
+                  "type": "file",
+                  "src": "comprehensive_test.wav"
+                },
+                {
+                  "key": "enable_asr",
+                  "value": "true",
+                  "type": "text"
+                },
+                {
+                  "key": "enable_speaker_id",
+                  "value": "true",
+                  "type": "text"
+                },
+                {
+                  "key": "enable_diarization",
+                  "value": "false",
+                  "type": "text"
+                },
+                {
+                  "key": "enable_vad",
+                  "value": "true",
+                  "type": "text"
+                },
+                {
+                  "key": "language",
+                  "value": "auto",
+                  "type": "text"
+                },
+                {
+                  "key": "save_to_database",
+                  "value": "true",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/process",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "process"]
+            }
+          }
+        },
+        {
+          "name": "快速语音转文字",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "audio_file",
+                  "type": "file",
+                  "src": "quick_test.wav"
+                },
+                {
+                  "key": "language",
+                  "value": "auto",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/quick-transcribe",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "quick-transcribe"]
+            }
+          }
+        },
+        {
+          "name": "快速声纹识别",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "audio_file",
+                  "type": "file",
+                  "src": "quick_speaker.wav"
+                },
+                {
+                  "key": "threshold",
+                  "value": "0.75",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/quick-speaker-id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "quick-speaker-id"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "会话管理",
+      "item": [
+        {
+          "name": "列出处理会话",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/sessions?limit=50&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "sessions"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset", 
+                  "value": "0"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "获取会话详情",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/sessions/{{session_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "sessions", "{{session_id}}"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

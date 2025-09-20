@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  # 语音识别服务 (GPU版本)
+  speech-service:
+    dockerfile: Dockerfile.gpu
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DEBUG=true
+      - DATABASE_URL=postgresql+asyncpg://speech_user:speech_pass@postgres:5432/speech_recognition
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin123
+      - LOG_LEVEL=INFO
+      # CUDA环境变量
+      - DEVICE_TYPE=gpu
+      - CUDA_VISIBLE_DEVICES=0
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - ./models:/app/models
+      - ./app:/app/app
+    depends_on:
+      - postgres
+      - minio
+    networks:
+      - speech-network
+    # GPU支持
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # PostgreSQL数据库
+  postgres:
+    image: pgvector/pgvector:pg15
+    environment:
+      - POSTGRES_DB=speech_recognition
+      - POSTGRES_USER=speech_user
+      - POSTGRES_PASSWORD=speech_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - speech-network
+
+  # MinIO对象存储
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin123
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - speech-network
+
+volumes:
+  postgres_data:
+  minio_data:
+
+networks:
+  speech-network:
+    driver: bridge

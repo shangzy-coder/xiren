@@ -39,7 +39,7 @@
         "id": 4,
         "title": "设计 RESTful API 接口",
         "description": "设计语音识别和声纹识别的 API 端点",
-        "status": "pending",
+        "status": "done",
         "priority": "medium",
         "dependencies": [
           3
@@ -51,7 +51,7 @@
         "id": 5,
         "title": "集成 PostgreSQL 数据库",
         "description": "配置数据库连接，设计表结构",
-        "status": "pending",
+        "status": "done",
         "priority": "medium",
         "dependencies": [
           1
@@ -127,7 +127,7 @@
       "description": "语音识别服务任务列表",
       "totalTasks": 10,
       "created": "2025-09-20T11:45:00.930Z",
-      "updated": "2025-09-20T12:26:35.283Z"
+      "updated": "2025-09-20T12:44:17.066Z"
     }
   }
 }
