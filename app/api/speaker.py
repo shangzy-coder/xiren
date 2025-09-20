@@ -2,14 +2,20 @@
 声纹识别接口
 基于Sherpa-ONNX实现声纹注册、识别和管理
 """
-from fastapi import APIRouter, HTTPException, status, Query, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, status, Query, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import logging
 import numpy as np
+import io
+import uuid
+import time
 
-from app.core.model import register_speaker, get_model_info
+from app.core.speaker_pool import get_speaker_pool
+from app.services.db import get_database_service
+from app.utils.audio import AudioProcessor
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -22,7 +28,44 @@ class SpeakerResponse(BaseModel):
     data: Dict[str, Any] = {}
 
 
-@router.get("/list")
+class SpeakerRegisterRequest(BaseModel):
+    """说话人注册请求模型"""
+    name: str
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class SpeakerIdentifyRequest(BaseModel):
+    """说话人识别请求模型"""
+    threshold: Optional[float] = None
+    
+    
+@router.get("/status")
+async def get_speaker_status():
+    """
+    获取声纹识别服务状态
+    """
+    try:
+        speaker_pool = await get_speaker_pool()
+        db_service = await get_database_service()
+        
+        speaker_stats = speaker_pool.get_stats()
+        db_stats = await db_service.get_speaker_stats()
+        
+        return {
+            "status": "running",
+            "speaker_pool": speaker_stats,
+            "database": db_stats,
+            "version": "1.0.0"
+        }
+    except Exception as e:
+        logger.error(f"获取声纹识别状态失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="无法获取声纹识别服务状态"
+        )
+
+
+@router.get("/speakers")
 async def list_speakers(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0)
@@ -35,12 +78,14 @@ async def list_speakers(
         offset: 分页偏移量
     """
     try:
-        # TODO: 从数据库中获取说话人列表
-        # 这里需要实现数据库查询逻辑
+        db_service = await get_database_service()
+        speakers = await db_service.get_all_speakers(limit=limit, offset=offset)
+        total = len(speakers)  # 这里可以优化，单独查询总数
+        
         return {
             "status": "success",
-            "total": 0,  # 待实现：从数据库获取总数
-            "speakers": [],  # 待实现：从数据库获取说话人列表
+            "total": total,
+            "speakers": speakers,
             "limit": limit,
             "offset": offset
         }
@@ -52,282 +97,287 @@ async def list_speakers(
         )
 
 
-@router.post("/register", response_model=SpeakerResponse)
-async def register_speaker_endpoint(
-    speaker_name: str = Form(..., description="说话人名称"),
-    file: UploadFile = File(..., description="声纹注册音频文件"),
-    sample_rate: Optional[int] = Form(default=None, description="音频采样率")
+@router.post("/register")
+async def register_speaker(
+    background_tasks: BackgroundTasks,
+    name: str = Form(...),
+    audio_file: UploadFile = File(...),
+    metadata: Optional[str] = Form(None)
 ):
     """
-    注册新的说话人声纹
+    注册新的说话人
     
     Args:
-        speaker_name: 说话人名称
-        file: 包含说话人语音的音频文件
-        sample_rate: 音频采样率
+        name: 说话人姓名
+        audio_file: 音频文件
+        metadata: 附加元数据 (JSON字符串)
     """
     try:
-        # 检查模型状态
-        model_info = get_model_info()
-        if not model_info["initialized"] or not model_info["speaker_extractor"]:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="声纹识别模型未初始化或不可用"
-            )
-        
-        # 验证说话人名称
-        if not speaker_name or len(speaker_name.strip()) == 0:
+        # 验证音频文件格式
+        if not audio_file.content_type.startswith('audio/'):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="说话人名称不能为空"
+                detail="上传的文件不是音频格式"
             )
         
-        # 验证文件类型
-        if not file.content_type.startswith('audio/'):
-            logger.warning(f"上传文件类型可能不正确: {file.content_type}")
+        # 读取音频数据
+        audio_data = await audio_file.read()
         
-        # 读取音频文件
-        audio_bytes = await file.read()
-        logger.info(f"接收到声纹注册音频: {file.filename}, 大小: {len(audio_bytes)} bytes")
-        
-        # 转换音频数据
-        try:
-            audio_data = np.frombuffer(audio_bytes, dtype=np.float32)
-        except Exception:
-            logger.warning("直接转换音频数据失败")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="不支持的音频格式，请上传WAV格式的音频文件"
-            )
-        
-        # 检查音频长度
-        duration = len(audio_data) / (sample_rate or 16000)
-        if duration < 1.0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="音频时长太短，至少需要1秒的语音用于声纹注册"
-            )
-        
-        # 注册声纹
-        success = await register_speaker(
-            speaker_name=speaker_name.strip(),
-            audio_data=audio_data,
-            sample_rate=sample_rate
+        # 处理音频
+        audio_processor = AudioProcessor()
+        processed_audio = await audio_processor.convert_and_resample(
+            audio_data, 
+            output_sample_rate=settings.SAMPLE_RATE
         )
         
-        if success:
-            logger.info(f"说话人 '{speaker_name}' 声纹注册成功")
-            
-            # TODO: 将注册信息保存到数据库
-            # await save_speaker_to_database(speaker_name, embedding_info)
-            
-            return SpeakerResponse(
-                success=True,
-                message=f"说话人 '{speaker_name}' 声纹注册成功",
-                data={
-                    "speaker_name": speaker_name,
-                    "audio_duration": duration,
-                    "registration_time": None  # TODO: 添加时间戳
-                }
-            )
-        else:
-            logger.error(f"说话人 '{speaker_name}' 声纹注册失败")
+        # 转换为numpy数组
+        audio_array = np.frombuffer(processed_audio, dtype=np.float32)
+        
+        # 解析元数据
+        speaker_metadata = {}
+        if metadata:
+            import json
+            try:
+                speaker_metadata = json.loads(metadata)
+            except json.JSONDecodeError:
+                logger.warning(f"无效的元数据格式: {metadata}")
+        
+        # 添加文件信息到元数据
+        speaker_metadata.update({
+            'original_filename': audio_file.filename,
+            'file_size': len(audio_data),
+            'registration_source': 'api_upload'
+        })
+        
+        # 注册说话人
+        speaker_pool = await get_speaker_pool()
+        success = await speaker_pool.register_speaker(
+            speaker_name=name,
+            audio_data=audio_array,
+            sample_rate=settings.SAMPLE_RATE,
+            metadata=speaker_metadata
+        )
+        
+        if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"说话人 '{speaker_name}' 声纹注册失败"
+                detail="说话人注册失败"
             )
+        
+        # 后台任务：保存到数据库
+        background_tasks.add_task(
+            _save_speaker_to_database,
+            name,
+            audio_array,
+            speaker_metadata
+        )
+        
+        return {
+            "status": "success",
+            "message": f"说话人 {name} 注册成功",
+            "data": {
+                "name": name,
+                "metadata": speaker_metadata
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"注册说话人失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"注册说话人失败: {str(e)}"
+        )
+
+
+@router.post("/identify")
+async def identify_speaker(
+    audio_file: UploadFile = File(...),
+    threshold: Optional[float] = Form(None)
+):
+    """
+    识别说话人
+    
+    Args:
+        audio_file: 音频文件
+        threshold: 相似度阈值
+    """
+    try:
+        # 验证音频文件格式
+        if not audio_file.content_type.startswith('audio/'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="上传的文件不是音频格式"
+            )
+        
+        # 读取音频数据
+        audio_data = await audio_file.read()
+        
+        # 处理音频
+        audio_processor = AudioProcessor()
+        processed_audio = await audio_processor.convert_and_resample(
+            audio_data, 
+            output_sample_rate=settings.SAMPLE_RATE
+        )
+        
+        # 转换为numpy数组
+        audio_array = np.frombuffer(processed_audio, dtype=np.float32)
+        
+        # 识别说话人
+        speaker_pool = await get_speaker_pool()
+        result = await speaker_pool.identify_speaker(
+            audio_data=audio_array,
+            sample_rate=settings.SAMPLE_RATE,
+            threshold=threshold
+        )
+        
+        if result:
+            speaker_name, similarity = result
+            return {
+                "status": "success",
+                "message": "说话人识别成功",
+                "data": {
+                    "speaker_name": speaker_name,
+                    "similarity": float(similarity),
+                    "threshold": threshold or settings.SPEAKER_SIMILARITY_THRESHOLD,
+                    "confidence": "high" if similarity > 0.8 else "medium" if similarity > 0.6 else "low"
+                }
+            }
+        else:
+            return {
+                "status": "success",
+                "message": "未识别到已注册的说话人",
+                "data": {
+                    "speaker_name": None,
+                    "similarity": 0.0,
+                    "threshold": threshold or settings.SPEAKER_SIMILARITY_THRESHOLD,
+                    "confidence": "none"
+                }
+            }
             
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"处理声纹注册请求失败: {e}")
+        logger.error(f"识别说话人失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"处理声纹注册请求失败: {str(e)}"
+            detail=f"识别说话人失败: {str(e)}"
         )
 
 
-@router.post("/identify", response_model=SpeakerResponse)
-async def identify_speaker(
-    file: UploadFile = File(..., description="待识别的音频文件"),
-    threshold: float = Form(default=0.75, description="相似度阈值"),
-    sample_rate: Optional[int] = Form(default=None, description="音频采样率")
+@router.post("/diarization")
+async def speaker_diarization(
+    audio_file: UploadFile = File(...),
+    num_speakers: Optional[int] = Form(None)
 ):
     """
-    识别音频中的说话人身份
+    说话人分离
     
     Args:
-        file: 包含语音的音频文件
-        threshold: 相似度阈值
-        sample_rate: 音频采样率
+        audio_file: 音频文件
+        num_speakers: 预期说话人数量 (-1为自动检测)
     """
     try:
-        # 检查模型状态
-        model_info = get_model_info()
-        if not model_info["initialized"] or not model_info["speaker_extractor"]:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="声纹识别模型未初始化或不可用"
-            )
-        
-        # 读取音频文件
-        audio_bytes = await file.read()
-        logger.info(f"接收到声纹识别音频: {file.filename}, 大小: {len(audio_bytes)} bytes")
-        
-        # 转换音频数据
-        try:
-            audio_data = np.frombuffer(audio_bytes, dtype=np.float32)
-        except Exception:
+        # 验证音频文件格式
+        if not audio_file.content_type.startswith('audio/'):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="不支持的音频格式，请上传WAV格式的音频文件"
+                detail="上传的文件不是音频格式"
             )
         
-        # TODO: 实现声纹识别逻辑
-        # 这里需要：
-        # 1. 提取音频的声纹特征
-        # 2. 与已注册的声纹进行比较
-        # 3. 返回匹配结果和相似度
+        # 读取音频数据
+        audio_data = await audio_file.read()
         
-        # 临时返回
-        return SpeakerResponse(
-            success=True,
-            message="声纹识别功能正在开发中",
-            data={
-                "filename": file.filename,
-                "matches": [],
-                "unknown_speaker": True,
-                "threshold": threshold
+        # 处理音频
+        audio_processor = AudioProcessor()
+        processed_audio = await audio_processor.convert_and_resample(
+            audio_data, 
+            output_sample_rate=settings.SAMPLE_RATE
+        )
+        
+        # 转换为numpy数组
+        audio_array = np.frombuffer(processed_audio, dtype=np.float32)
+        
+        # 说话人分离
+        speaker_pool = await get_speaker_pool()
+        segments = await speaker_pool.diarize_speakers(
+            audio_data=audio_array,
+            sample_rate=settings.SAMPLE_RATE,
+            num_speakers=num_speakers or -1
+        )
+        
+        if not segments:
+            return {
+                "status": "success",
+                "message": "未检测到说话人片段",
+                "data": {
+                    "segments": [],
+                    "total_speakers": 0,
+                    "total_duration": 0.0
+                }
             }
-        )
         
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"处理声纹识别请求失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"处理声纹识别请求失败: {str(e)}"
-        )
-
-
-@router.post("/verify", response_model=SpeakerResponse)
-async def verify_speaker(
-    file: UploadFile = File(..., description="待验证的音频文件"),
-    speaker_name: str = Form(..., description="要验证的说话人名称"),
-    threshold: float = Form(default=0.75, description="相似度阈值"),
-    sample_rate: Optional[int] = Form(default=None, description="音频采样率")
-):
-    """
-    验证音频是否为指定说话人
-    
-    Args:
-        file: 包含语音的音频文件
-        speaker_name: 要验证的说话人名称
-        threshold: 相似度阈值
-        sample_rate: 音频采样率
-    """
-    try:
-        # 检查模型状态
-        model_info = get_model_info()
-        if not model_info["initialized"] or not model_info["speaker_extractor"]:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="声纹识别模型未初始化或不可用"
-            )
+        # 计算统计信息
+        total_duration = sum(seg['duration'] for seg in segments)
+        unique_speakers = len(set(seg['speaker'] for seg in segments))
         
-        # 读取音频文件
-        audio_bytes = await file.read()
-        logger.info(f"接收到声纹验证音频: {file.filename}, 大小: {len(audio_bytes)} bytes")
-        
-        # 转换音频数据
-        try:
-            audio_data = np.frombuffer(audio_bytes, dtype=np.float32)
-        except Exception:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="不支持的音频格式，请上传WAV格式的音频文件"
-            )
-        
-        # TODO: 实现声纹验证逻辑
-        # 这里需要：
-        # 1. 提取音频的声纹特征
-        # 2. 与指定说话人的声纹进行比较
-        # 3. 返回验证结果和相似度
-        
-        # 临时返回
-        return SpeakerResponse(
-            success=True,
-            message="声纹验证功能正在开发中",
-            data={
-                "filename": file.filename,
-                "speaker_name": speaker_name,
-                "verified": False,
-                "similarity": 0.0,
-                "threshold": threshold
-            }
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"处理声纹验证请求失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"处理声纹验证请求失败: {str(e)}"
-        )
-
-
-@router.delete("/{speaker_name}")
-async def delete_speaker(speaker_name: str):
-    """
-    删除已注册的说话人
-    
-    Args:
-        speaker_name: 说话人名称
-    """
-    try:
-        # TODO: 实现从数据库删除说话人的逻辑
-        # await delete_speaker_from_database(speaker_name)
-        
-        # 临时返回
         return {
             "status": "success",
-            "message": f"说话人 '{speaker_name}' 删除功能正在开发中",
-            "speaker_name": speaker_name
+            "message": f"检测到 {unique_speakers} 个说话人",
+            "data": {
+                "segments": segments,
+                "total_speakers": unique_speakers,
+                "total_duration": total_duration,
+                "total_segments": len(segments)
+            }
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"删除说话人失败: {e}")
+        logger.error(f"说话人分离失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"删除说话人失败: {str(e)}"
+            detail=f"说话人分离失败: {str(e)}"
         )
 
 
-@router.get("/{speaker_name}")
+@router.get("/speakers/{speaker_name}")
 async def get_speaker_info(speaker_name: str):
     """
-    获取指定说话人的信息
+    获取特定说话人信息
     
     Args:
-        speaker_name: 说话人名称
+        speaker_name: 说话人姓名
     """
     try:
-        # TODO: 从数据库获取说话人详细信息
-        # speaker_info = await get_speaker_from_database(speaker_name)
+        db_service = await get_database_service()
+        speaker_info = await db_service.get_speaker_by_name(speaker_name)
         
-        # 临时返回
-        return {
-            "status": "success",
-            "speaker": {
-                "name": speaker_name,
-                "registered_at": None,
-                "audio_samples": 0,
-                "last_verification": None
-            }
+        if not speaker_info:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"说话人 {speaker_name} 不存在"
+            )
+        
+        # 不返回声纹特征数据，只返回元信息
+        response_data = {
+            'id': speaker_info['id'],
+            'name': speaker_info['name'],
+            'metadata': speaker_info['metadata'],
+            'created_at': speaker_info['created_at'].isoformat(),
+            'updated_at': speaker_info['updated_at'].isoformat(),
+            'has_embedding': speaker_info['embedding'] is not None
         }
         
+        return {
+            "status": "success",
+            "data": response_data
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取说话人信息失败: {e}")
         raise HTTPException(
@@ -336,26 +386,140 @@ async def get_speaker_info(speaker_name: str):
         )
 
 
-@router.get("/status")
-async def get_speaker_service_status():
+@router.delete("/speakers/{speaker_name}")
+async def delete_speaker(speaker_name: str):
     """
-    获取声纹识别服务状态
+    删除说话人记录
+    
+    Args:
+        speaker_name: 说话人姓名
     """
     try:
-        model_info = get_model_info()
+        # 从内存池中删除
+        speaker_pool = await get_speaker_pool()
+        pool_success = speaker_pool.remove_speaker(speaker_name)
+        
+        # 从数据库中删除
+        db_service = await get_database_service()
+        db_success = await db_service.delete_speaker(speaker_name)
+        
+        if not db_success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"说话人 {speaker_name} 不存在"
+            )
         
         return {
-            "service": "speaker-recognition",
-            "status": "running" if model_info["initialized"] else "initializing",
-            "speaker_model_loaded": model_info["speaker_extractor"],
-            "speaker_manager_loaded": model_info["speaker_manager"],
-            "registered_speakers": 0,  # TODO: 从数据库获取
-            "version": "1.0.0"
+            "status": "success",
+            "message": f"说话人 {speaker_name} 已删除",
+            "data": {
+                "removed_from_pool": pool_success,
+                "removed_from_database": db_success
+            }
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"获取声纹服务状态失败: {e}")
+        logger.error(f"删除说话人失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="无法获取声纹识别服务状态"
+            detail=f"删除说话人失败: {str(e)}"
         )
+
+
+@router.post("/search")
+async def search_speakers_by_voice(
+    audio_file: UploadFile = File(...),
+    threshold: Optional[float] = Form(None),
+    limit: Optional[int] = Form(5)
+):
+    """
+    通过语音搜索相似的说话人
+    
+    Args:
+        audio_file: 音频文件
+        threshold: 相似度阈值
+        limit: 返回结果数量限制
+    """
+    try:
+        # 验证音频文件格式
+        if not audio_file.content_type.startswith('audio/'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="上传的文件不是音频格式"
+            )
+        
+        # 读取音频数据
+        audio_data = await audio_file.read()
+        
+        # 处理音频
+        audio_processor = AudioProcessor()
+        processed_audio = await audio_processor.convert_and_resample(
+            audio_data, 
+            output_sample_rate=settings.SAMPLE_RATE
+        )
+        
+        # 转换为numpy数组
+        audio_array = np.frombuffer(processed_audio, dtype=np.float32)
+        
+        # 提取声纹特征
+        speaker_pool = await get_speaker_pool()
+        embedding = await speaker_pool.extract_embedding(
+            audio_data=audio_array,
+            sample_rate=settings.SAMPLE_RATE
+        )
+        
+        if embedding is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="无法提取声纹特征"
+            )
+        
+        # 在数据库中搜索相似说话人
+        db_service = await get_database_service()
+        similar_speakers = await db_service.search_speakers_by_embedding(
+            embedding=embedding,
+            threshold=threshold or settings.SPEAKER_SIMILARITY_THRESHOLD,
+            limit=limit or 5
+        )
+        
+        return {
+            "status": "success",
+            "message": f"找到 {len(similar_speakers)} 个相似说话人",
+            "data": {
+                "speakers": similar_speakers,
+                "threshold": threshold or settings.SPEAKER_SIMILARITY_THRESHOLD,
+                "total": len(similar_speakers)
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"声纹搜索失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"声纹搜索失败: {str(e)}"
+        )
+
+
+async def _save_speaker_to_database(
+    name: str, 
+    embedding: np.ndarray, 
+    metadata: Dict[str, Any]
+):
+    """后台任务：保存说话人到数据库"""
+    try:
+        db_service = await get_database_service()
+        await db_service.insert_speaker(
+            name=name,
+            embedding=embedding,
+            metadata=metadata
+        )
+        logger.info(f"说话人 {name} 已保存到数据库")
+    except Exception as e:
+        logger.error(f"保存说话人到数据库失败: {e}")
+
+
+# TODO: 添加声纹模型管理、批量注册、导入导出等功能

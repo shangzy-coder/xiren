@@ -27,7 +27,7 @@
         "id": 3,
         "title": "实现声纹识别功能",
         "description": "集成声纹识别模型，实现说话人识别",
-        "status": "pending",
+        "status": "done",
         "priority": "high",
         "dependencies": [
           2
@@ -127,7 +127,7 @@
       "description": "语音识别服务任务列表",
       "totalTasks": 10,
       "created": "2025-09-20T11:45:00.930Z",
-      "updated": "2025-09-20T12:17:19.991Z"
+      "updated": "2025-09-20T12:26:35.283Z"
     }
   }
 }

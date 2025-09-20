@@ -25,9 +25,10 @@ scipy>=1.7.0
 # torchaudio>=2.0.0
 onnxruntime>=1.15.0
 
-# 语音识别 (按需安装)
-# sherpa-onnx>=1.9.0
-# pyannote-audio>=3.1.0
+# 语音识别
+sherpa-onnx>=1.9.0
+soundfile>=0.12.1
+librosa>=0.10.0
 
 # 工具库
 structlog==23.2.0
