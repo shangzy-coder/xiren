@@ -21,8 +21,10 @@ from app.core.model import (
 )
 from app.core.request_manager import get_request_manager, TaskPriority
 from app.core.queue import TaskType
+from app.utils.logging_config import get_logger, log_request_response
+from app.utils.metrics import metrics_collector
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 router = APIRouter()
 
 
@@ -119,6 +121,7 @@ async def initialize_asr_models(
 
 
 @router.post("/transcribe", response_model=ASRResponse)
+@log_request_response
 async def transcribe_audio(
     file: UploadFile = File(..., description="音频文件"),
     enable_vad: bool = Form(default=True, description="是否启用语音活动检测"),
