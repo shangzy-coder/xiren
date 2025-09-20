@@ -63,7 +63,7 @@
         "id": 6,
         "title": "实现 pgvector 声纹存储",
         "description": "使用 pgvector 扩展存储和检索声纹向量",
-        "status": "pending",
+        "status": "done",
         "priority": "medium",
         "dependencies": [
           5,
@@ -127,7 +127,7 @@
       "description": "语音识别服务任务列表",
       "totalTasks": 10,
       "created": "2025-09-20T11:45:00.930Z",
-      "updated": "2025-09-20T12:44:17.066Z"
+      "updated": "2025-09-20T13:08:42.332Z"
     }
   }
 }

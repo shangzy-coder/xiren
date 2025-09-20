@@ -69,91 +69,62 @@ class DatabaseService:
             return False
     
     async def _setup_database(self):
-        """设置数据库表和扩展"""
-        async with self.pool.acquire() as conn:
-            try:
-                # 启用pgvector扩展
-                await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-                logger.info("pgvector扩展已启用")
+        """通过读取init_db.sql脚本设置数据库表和扩展"""
+        import os
+        from pathlib import Path
+        
+        # 获取init_db.sql文件路径
+        current_dir = Path(__file__).parent.parent.parent  # 项目根目录
+        init_sql_path = current_dir / "scripts" / "init_db.sql"
+        
+        if not init_sql_path.exists():
+            logger.error(f"找不到数据库初始化脚本: {init_sql_path}")
+            raise FileNotFoundError(f"数据库初始化脚本不存在: {init_sql_path}")
+        
+        try:
+            # 读取SQL脚本内容
+            with open(init_sql_path, 'r', encoding='utf-8') as f:
+                sql_content = f.read()
+            
+            async with self.pool.acquire() as conn:
+                # 执行初始化脚本
+                await conn.execute(sql_content)
+                logger.info(f"数据库初始化脚本执行完成: {init_sql_path.name}")
                 
-                # 创建speakers表
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS speakers (
-                        id SERIAL PRIMARY KEY,
-                        name VARCHAR(255) NOT NULL UNIQUE,
-                        embedding VECTOR(512),  -- 假设512维特征向量
-                        metadata JSONB DEFAULT '{}',
-                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-                
-                # 创建索引
-                await conn.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_speakers_name ON speakers(name);
-                """)
-                await conn.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_speakers_embedding ON speakers 
-                    USING ivfflat (embedding vector_cosine_ops);
-                """)
-                
-                # 创建audio_files表
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS audio_files (
-                        id SERIAL PRIMARY KEY,
-                        filename VARCHAR(500) NOT NULL,
-                        file_path VARCHAR(1000),
-                        file_size BIGINT,
-                        duration FLOAT,
-                        sample_rate INTEGER,
-                        channels INTEGER,
-                        format VARCHAR(50),
-                        speaker_id INTEGER REFERENCES speakers(id),
-                        metadata JSONB DEFAULT '{}',
-                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-                
-                # 创建recognition_sessions表
-                await conn.execute("""
-                    CREATE TABLE IF NOT EXISTS recognition_sessions (
-                        id SERIAL PRIMARY KEY,
-                        session_id VARCHAR(100) NOT NULL,
-                        status VARCHAR(50) DEFAULT 'pending',
-                        audio_file_id INTEGER REFERENCES audio_files(id),
-                        results JSONB DEFAULT '{}',
-                        recognition_type VARCHAR(50), -- 'asr', 'speaker_id', 'diarization'
-                        processing_time FLOAT,
-                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                        completed_at TIMESTAMP WITH TIME ZONE
-                    );
-                """)
-                
-                logger.info("数据库表结构设置完成")
-                
-            except Exception as e:
-                logger.error(f"数据库设置失败: {e}")
-                raise
+        except Exception as e:
+            logger.error(f"数据库初始化失败: {e}")
+            raise
     
     async def insert_speaker(self, 
                            name: str, 
                            embedding: np.ndarray, 
-                           metadata: Dict[str, Any] = None) -> Optional[int]:
+                           metadata: Dict[str, Any] = None,
+                           speaker_id: str = None) -> Optional[int]:
         """插入新的说话人记录"""
         if not self._initialized:
             await self.initialize()
         
+        # 如果没有提供speaker_id，则生成一个
+        if speaker_id is None:
+            import uuid
+            speaker_id = f"speaker_{uuid.uuid4().hex[:8]}"
+        
         try:
-            # 将numpy数组转换为列表
-            embedding_list = embedding.tolist() if embedding is not None else None
+            # 将numpy数组转换为pgvector格式字符串
+            if embedding is not None:
+                embedding_list = embedding.tolist() if isinstance(embedding, np.ndarray) else embedding
+                # pgvector需要向量格式为字符串 "[1,2,3,...]"
+                embedding_str = str(embedding_list)
+            else:
+                embedding_str = None
             metadata = metadata or {}
             
             async with self.pool.acquire() as conn:
                 result = await conn.fetchrow("""
-                    INSERT INTO speakers (name, embedding, metadata) 
-                    VALUES ($1, $2, $3) 
+                    INSERT INTO speakers (speaker_id, speaker_name, embedding, metadata) 
+                    VALUES ($1, $2, $3, $4) 
                     RETURNING id
-                """, name, embedding_list, json.dumps(metadata))
+                """, speaker_id, name, embedding_str, json.dumps(metadata))
                 
                 speaker_id = result['id']
                 logger.info(f"插入说话人记录: {name} (ID: {speaker_id})")
@@ -182,9 +153,11 @@ class DatabaseService:
                 param_count = 2
                 
                 if embedding is not None:
-                    embedding_list = embedding.tolist()
+                    embedding_list = embedding.tolist() if isinstance(embedding, np.ndarray) else embedding
+                    # pgvector需要向量格式为字符串 "[1,2,3,...]"
+                    embedding_str = str(embedding_list)
                     updates.append(f"embedding = ${param_count}")
-                    values.append(embedding_list)
+                    values.append(embedding_str)
                     param_count += 1
                 
                 if metadata is not None:
@@ -195,7 +168,7 @@ class DatabaseService:
                 query = f"""
                     UPDATE speakers 
                     SET {', '.join(updates)}
-                    WHERE name = $1 
+                    WHERE speaker_name = $1 
                     RETURNING id
                 """
                 
@@ -227,7 +200,7 @@ class DatabaseService:
                 # 使用余弦相似度搜索
                 results = await conn.fetch("""
                     SELECT 
-                        id, name, metadata, 
+                        id, speaker_name as name, metadata, 
                         1 - (embedding <=> $1::vector) as similarity,
                         created_at, updated_at
                     FROM speakers 
@@ -263,9 +236,9 @@ class DatabaseService:
         try:
             async with self.pool.acquire() as conn:
                 result = await conn.fetchrow("""
-                    SELECT id, name, embedding, metadata, created_at, updated_at 
+                    SELECT id, speaker_name as name, embedding, metadata, created_at, updated_at 
                     FROM speakers 
-                    WHERE name = $1
+                    WHERE speaker_name = $1
                 """, name)
                 
                 if result:
@@ -294,7 +267,7 @@ class DatabaseService:
         try:
             async with self.pool.acquire() as conn:
                 results = await conn.fetch("""
-                    SELECT id, name, metadata, created_at, updated_at
+                    SELECT id, speaker_name as name, metadata, created_at, updated_at
                     FROM speakers 
                     ORDER BY created_at DESC 
                     LIMIT $1 OFFSET $2
@@ -323,8 +296,8 @@ class DatabaseService:
         
         try:
             async with self.pool.acquire() as conn:
-                result = await conn.execute("""
-                    DELETE FROM speakers WHERE name = $1
+                result =                 await conn.execute("""
+                    DELETE FROM speakers WHERE speaker_name = $1
                 """, name)
                 
                 if result == "DELETE 1":

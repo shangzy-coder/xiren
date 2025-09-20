@@ -23,6 +23,7 @@ import numpy as np
 import sherpa_onnx
 
 from app.config import settings
+from app.services.db import get_database_service
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,10 @@ class SpeakerPool:
         self.speaker_manager: Optional[sherpa_onnx.SpeakerEmbeddingManager] = None
         self.diarization: Optional[sherpa_onnx.OfflineSpeakerDiarization] = None
         
-        # 声纹存储
+        # 数据库服务
+        self.db_service = None
+        
+        # 声纹存储（内存缓存）
         self.registered_speakers: Dict[str, np.ndarray] = {}
         self.speaker_metadata: Dict[str, Dict[str, Any]] = {}
         self.speaker_counter = 0
@@ -67,13 +71,22 @@ class SpeakerPool:
         self._initialized = False
     
     async def initialize(self) -> bool:
-        """异步初始化模型"""
+        """异步初始化模型和数据库服务"""
         if self._initialized:
             return True
             
         try:
+            # 初始化数据库服务
+            self.db_service = await get_database_service()
+            logger.info("数据库服务连接成功")
+            
+            # 初始化模型
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(self._executor, self._init_models)
+            
+            # 加载已注册的说话人到内存缓存
+            await self._load_registered_speakers()
+            
             self._initialized = True
             logger.info("声纹池管理器初始化成功")
             return True
@@ -127,6 +140,27 @@ class SpeakerPool:
                     logger.info("说话人分离器初始化成功")
             except Exception as e:
                 logger.warning(f"说话人分离器初始化失败: {e}")
+    
+    async def _load_registered_speakers(self):
+        """从数据库加载已注册的说话人到内存缓存"""
+        try:
+            speakers = await self.db_service.get_all_speakers()
+            for speaker in speakers:
+                if speaker.get('name'):
+                    # 从数据库获取声纹特征
+                    speaker_data = await self.db_service.get_speaker_by_name(speaker['name'])
+                    if speaker_data and speaker_data.get('embedding') is not None:
+                        embedding = speaker_data['embedding']
+                        self.registered_speakers[speaker['name']] = embedding
+                        self.speaker_metadata[speaker['name']] = speaker_data.get('metadata', {})
+                        
+                        # 添加到Sherpa-ONNX管理器
+                        if self.speaker_manager:
+                            self.speaker_manager.add(speaker['name'], embedding)
+            
+            logger.info(f"从数据库加载了 {len(self.registered_speakers)} 个已注册说话人")
+        except Exception as e:
+            logger.error(f"加载已注册说话人失败: {e}")
     
     async def extract_embedding(self, 
                               audio_data: np.ndarray, 
@@ -198,34 +232,56 @@ class SpeakerPool:
                 logger.error(f"无法为说话人 {speaker_name} 提取声纹特征")
                 return False
             
-            with self._lock:
-                # 检查是否已存在
-                if speaker_name in self.registered_speakers:
-                    # 平均已有特征
-                    existing_embedding = self.registered_speakers[speaker_name]
-                    averaged_embedding = (existing_embedding + embedding) / 2.0
-                    self.registered_speakers[speaker_name] = averaged_embedding
+            # 准备元数据
+            if metadata is None:
+                metadata = {}
+            metadata.update({
+                'registration_time': time.time(),
+                'embedding_dim': len(embedding),
+            })
+            
+            # 检查是否已存在并处理更新
+            existing_speaker = await self.db_service.get_speaker_by_name(speaker_name)
+            if existing_speaker and existing_speaker.get('embedding') is not None:
+                # 平均已有特征
+                existing_embedding = existing_speaker['embedding']
+                averaged_embedding = (existing_embedding + embedding) / 2.0
+                
+                # 更新数据库
+                speaker_id = await self.db_service.update_speaker(
+                    speaker_name, averaged_embedding, metadata
+                )
+                if speaker_id:
+                    # 更新内存缓存
+                    with self._lock:
+                        self.registered_speakers[speaker_name] = averaged_embedding
+                        self.speaker_metadata[speaker_name] = metadata
+                        
+                        # 更新Sherpa-ONNX管理器
+                        if self.speaker_manager:
+                            self.speaker_manager.add(speaker_name, averaged_embedding)
+                    
                     logger.info(f"更新说话人 {speaker_name} 的声纹特征")
-                else:
-                    self.registered_speakers[speaker_name] = embedding
+                    return True
+            else:
+                # 新增说话人
+                speaker_id = await self.db_service.insert_speaker(
+                    speaker_name, embedding, metadata
+                )
+                if speaker_id:
+                    # 更新内存缓存
+                    with self._lock:
+                        self.registered_speakers[speaker_name] = embedding
+                        self.speaker_metadata[speaker_name] = metadata
+                        
+                        # 更新Sherpa-ONNX管理器
+                        if self.speaker_manager:
+                            self.speaker_manager.add(speaker_name, embedding)
+                    
                     logger.info(f"注册新说话人 {speaker_name}")
+                    return True
                 
-                # 更新管理器
-                if self.speaker_manager:
-                    status = self.speaker_manager.add(speaker_name, embedding)
-                    if not status:
-                        logger.warning(f"声纹管理器注册失败: {speaker_name}")
-                
-                # 保存元数据
-                if metadata is None:
-                    metadata = {}
-                metadata.update({
-                    'registration_time': time.time(),
-                    'embedding_dim': len(embedding),
-                })
-                self.speaker_metadata[speaker_name] = metadata
-                
-            return True
+            return False
             
         except Exception as e:
             logger.error(f"注册说话人失败 {speaker_name}: {e}")
@@ -255,6 +311,17 @@ class SpeakerPool:
             if embedding is None:
                 return None
             
+            # 优先使用数据库pgvector搜索
+            similar_speakers = await self.db_service.search_speakers_by_embedding(
+                embedding, threshold=threshold, limit=5
+            )
+            
+            if similar_speakers:
+                # 返回最相似的说话人
+                best_speaker = similar_speakers[0]
+                return best_speaker['name'], best_speaker['similarity']
+            
+            # 回退到内存搜索（如果数据库搜索失败）
             with self._lock:
                 if not self.registered_speakers:
                     logger.info("暂无注册的说话人")
@@ -269,7 +336,7 @@ class SpeakerPool:
                         similarity = self._compute_similarity(embedding, registered_embedding)
                         return speaker_name, similarity
                 
-                # 回退到手动搜索
+                # 手动搜索
                 best_match = None
                 best_similarity = -1.0
                 
@@ -287,6 +354,43 @@ class SpeakerPool:
         except Exception as e:
             logger.error(f"说话人识别失败: {e}")
             return None
+    
+    async def search_similar_speakers(self, 
+                                    audio_data: np.ndarray, 
+                                    sample_rate: int,
+                                    threshold: float = None,
+                                    limit: int = 5) -> List[Dict[str, Any]]:
+        """
+        搜索相似的说话人
+        
+        Args:
+            audio_data: 音频数据
+            sample_rate: 采样率
+            threshold: 相似度阈值
+            limit: 返回结果数量限制
+            
+        Returns:
+            相似说话人列表
+        """
+        if threshold is None:
+            threshold = settings.SPEAKER_SIMILARITY_THRESHOLD
+            
+        try:
+            # 提取声纹特征
+            embedding = await self.extract_embedding(audio_data, sample_rate)
+            if embedding is None:
+                return []
+            
+            # 使用数据库pgvector搜索
+            similar_speakers = await self.db_service.search_speakers_by_embedding(
+                embedding, threshold=threshold, limit=limit
+            )
+            
+            return similar_speakers
+            
+        except Exception as e:
+            logger.error(f"搜索相似说话人失败: {e}")
+            return []
     
     def _compute_similarity(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
         """计算两个声纹特征的余弦相似度"""
@@ -430,6 +534,85 @@ class SpeakerPool:
         except Exception as e:
             logger.error(f"加载说话人数据失败: {e}")
             return False
+    
+    async def delete_speaker(self, speaker_name: str) -> bool:
+        """
+        删除说话人
+        
+        Args:
+            speaker_name: 说话人姓名
+            
+        Returns:
+            删除是否成功
+        """
+        try:
+            # 从数据库删除
+            success = await self.db_service.delete_speaker(speaker_name)
+            if success:
+                # 从内存缓存删除
+                with self._lock:
+                    if speaker_name in self.registered_speakers:
+                        del self.registered_speakers[speaker_name]
+                    if speaker_name in self.speaker_metadata:
+                        del self.speaker_metadata[speaker_name]
+                    
+                    # 从Sherpa-ONNX管理器删除
+                    if self.speaker_manager:
+                        self.speaker_manager.remove(speaker_name)
+                
+                logger.info(f"删除说话人: {speaker_name}")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"删除说话人失败 {speaker_name}: {e}")
+            return False
+    
+    async def get_all_speakers(self) -> List[Dict[str, Any]]:
+        """
+        获取所有注册的说话人信息
+        
+        Returns:
+            说话人信息列表
+        """
+        try:
+            speakers = await self.db_service.get_all_speakers()
+            return speakers
+        except Exception as e:
+            logger.error(f"获取说话人列表失败: {e}")
+            return []
+    
+    async def get_speaker_info(self, speaker_name: str) -> Optional[Dict[str, Any]]:
+        """
+        获取特定说话人的详细信息
+        
+        Args:
+            speaker_name: 说话人姓名
+            
+        Returns:
+            说话人信息或None
+        """
+        try:
+            speaker_data = await self.db_service.get_speaker_by_name(speaker_name)
+            return speaker_data
+        except Exception as e:
+            logger.error(f"获取说话人信息失败 {speaker_name}: {e}")
+            return None
+    
+    async def get_speaker_stats(self) -> Dict[str, Any]:
+        """
+        获取说话人统计信息
+        
+        Returns:
+            统计信息字典
+        """
+        try:
+            stats = await self.db_service.get_speaker_stats()
+            return stats
+        except Exception as e:
+            logger.error(f"获取统计信息失败: {e}")
+            return {}
     
     def get_stats(self) -> Dict[str, Any]:
         """获取声纹池统计信息"""

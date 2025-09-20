@@ -13,7 +13,7 @@ class Settings:
     # 数据库配置
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL", 
-        "postgresql+asyncpg://user:password@localhost:5432/speech_recognition"
+        "postgresql+asyncpg://speech_user:speech_pass@localhost:5432/speech_recognition"
     )
     
     # MinIO配置

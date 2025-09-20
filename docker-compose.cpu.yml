@@ -3,8 +3,9 @@ version: '3.8'
 services:
   # 语音识别服务 (CPU版本)
   speech-service:
-    dockerfile: Dockerfile.cpu
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.cpu
     ports:
       - "8000:8000"
     environment:
