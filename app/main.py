@@ -6,10 +6,11 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import logging
 
-from app.api import asr, speaker, comprehensive, queue_example, pipeline
+from app.api import asr, speaker, comprehensive, queue_example, pipeline, websocket_stream
 from app.config import settings
 from app.core.queue import get_queue_manager, shutdown_queue_manager
 from app.core.request_manager import get_request_manager
+from app.core.websocket_manager import cleanup_websocket_manager
 from app.services.db import initialize_database
 
 # 配置日志
@@ -39,6 +40,7 @@ app.include_router(speaker.router, prefix="/api/v1/speaker", tags=["声纹识别
 app.include_router(comprehensive.router, prefix="/api/v1", tags=["综合处理"])
 app.include_router(pipeline.router, prefix="/api/v1/pipeline", tags=["语音处理流水线"])
 app.include_router(queue_example.router, prefix="/api/v1/queue", tags=["队列系统示例"])
+app.include_router(websocket_stream.router, prefix="/api/v1/websocket", tags=["WebSocket实时通信"])
 
 @app.get("/")
 async def root():
@@ -128,6 +130,11 @@ async def shutdown_event():
         logger.info("正在关闭队列管理器...")
         await shutdown_queue_manager()
         logger.info("队列管理器已关闭")
+        
+        # 关闭WebSocket管理器
+        logger.info("正在关闭WebSocket管理器...")
+        await cleanup_websocket_manager()
+        logger.info("WebSocket管理器已关闭")
         
         logger.info("语音识别服务已关闭")
         
