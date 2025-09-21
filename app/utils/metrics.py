@@ -4,15 +4,43 @@ Prometheus监控指标模块
 提供应用程序的各种性能指标收集和暴露功能。
 """
 
-from prometheus_client import Counter, Histogram, Gauge, Info, CollectorRegistry, generate_latest
-from prometheus_fastapi_instrumentator import Instrumentator, metrics
 from typing import Dict, Any
 import time
-import psutil
 import os
 
+# 尝试导入Prometheus相关模块，如果失败则使用空实现
+try:
+    from prometheus_client import Counter, Histogram, Gauge, Info, CollectorRegistry, generate_latest
+    from prometheus_fastapi_instrumentator import Instrumentator, metrics
+    import psutil
+    PROMETHEUS_AVAILABLE = True
+except ImportError:
+    PROMETHEUS_AVAILABLE = False
+    # 创建空的替代类
+    class MockMetric:
+        def __init__(self, *args, **kwargs):
+            pass
+        def inc(self, *args, **kwargs):
+            pass
+        def dec(self, *args, **kwargs):
+            pass
+        def set(self, *args, **kwargs):
+            pass
+        def observe(self, *args, **kwargs):
+            pass
+        def labels(self, *args, **kwargs):
+            return self
+        def info(self, *args, **kwargs):
+            pass
+
+    Counter = Histogram = Gauge = Info = MockMetric
+    CollectorRegistry = lambda: None
+    generate_latest = lambda x: "# Prometheus not available\n"
+    Instrumentator = None
+    metrics = None
+
 # 创建自定义指标注册表
-REGISTRY = CollectorRegistry()
+REGISTRY = CollectorRegistry() if PROMETHEUS_AVAILABLE else None
 
 # API请求相关指标
 api_requests_total = Counter(
@@ -160,17 +188,20 @@ class MetricsCollector:
     
     def update_system_metrics(self):
         """更新系统资源指标"""
+        if not PROMETHEUS_AVAILABLE:
+            return
+
         try:
             # 内存使用
             memory = psutil.virtual_memory()
             system_memory_usage.labels(type='total').set(memory.total)
             system_memory_usage.labels(type='available').set(memory.available)
             system_memory_usage.labels(type='used').set(memory.used)
-            
+
             # CPU使用率
             cpu_percent = psutil.cpu_percent(interval=1)
             system_cpu_usage.set(cpu_percent)
-            
+
             # GPU内存使用（如果有NVIDIA GPU）
             try:
                 import GPUtil
@@ -180,9 +211,10 @@ class MetricsCollector:
             except (ImportError, Exception):
                 # 如果没有安装GPUtil或获取GPU信息失败，跳过GPU指标
                 pass
-                
+
         except Exception as e:
-            error_count.labels(component='metrics_collector', error_type='system_metrics').inc()
+            if PROMETHEUS_AVAILABLE:
+                error_count.labels(component='metrics_collector', error_type='system_metrics').inc()
     
     def record_api_request(self, method: str, endpoint: str, status_code: int, duration: float):
         """记录API请求指标"""
@@ -243,6 +275,9 @@ metrics_collector = MetricsCollector()
 
 def setup_instrumentator(app):
     """设置FastAPI Prometheus instrumentator"""
+    if not PROMETHEUS_AVAILABLE:
+        return None
+
     instrumentator = Instrumentator(
         should_group_status_codes=False,
         should_ignore_untemplated=True,
@@ -253,9 +288,9 @@ def setup_instrumentator(app):
         inprogress_name="inprogress",
         inprogress_labels=True,
     )
-    
+
     instrumentator.instrument(app).expose(app, endpoint="/metrics", tags=["监控"])
-    
+
     # 添加自定义指标
     @instrumentator.add(
         metrics.requests(
@@ -270,15 +305,18 @@ def setup_instrumentator(app):
             status_code=info.response.status_code,
             duration=info.modified_duration
         )
-    
+
     return instrumentator
 
 
 def get_metrics():
     """获取所有指标数据"""
+    if not PROMETHEUS_AVAILABLE:
+        return "# Prometheus not available\n# Please install prometheus-client to enable metrics\n"
+
     # 更新系统指标
     metrics_collector.update_system_metrics()
-    
+
     # 返回指标数据
     return generate_latest(REGISTRY)
 

@@ -60,9 +60,9 @@ class Settings:
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")  # development, production
     
     # 监控配置
-    ENABLE_METRICS: bool = os.getenv("ENABLE_METRICS", "true").lower() == "true"
+    ENABLE_METRICS: bool = os.getenv("ENABLE_METRICS", "false").lower() == "true"
     METRICS_PORT: int = int(os.getenv("METRICS_PORT", "8001"))
-    ENABLE_SYSTEM_METRICS: bool = os.getenv("ENABLE_SYSTEM_METRICS", "true").lower() == "true"
+    ENABLE_SYSTEM_METRICS: bool = os.getenv("ENABLE_SYSTEM_METRICS", "false").lower() == "true"
     METRICS_UPDATE_INTERVAL: int = int(os.getenv("METRICS_UPDATE_INTERVAL", "30"))  # 秒
 
 settings = Settings()

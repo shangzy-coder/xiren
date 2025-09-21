@@ -136,12 +136,18 @@ class WebSocketManager:
         self.connection_buffers: Dict[str, AudioBuffer] = {}
         self._connection_counter = 0
         self._cleanup_task: Optional[asyncio.Task] = None
-        self._start_cleanup_task()
+        self._cleanup_started = False
     
     def _start_cleanup_task(self):
         """启动清理任务"""
-        if self._cleanup_task is None or self._cleanup_task.done():
-            self._cleanup_task = asyncio.create_task(self._cleanup_inactive_connections())
+        if not self._cleanup_started:
+            try:
+                if self._cleanup_task is None or self._cleanup_task.done():
+                    self._cleanup_task = asyncio.create_task(self._cleanup_inactive_connections())
+                    self._cleanup_started = True
+            except RuntimeError:
+                # 如果没有运行的事件循环，延迟启动
+                pass
     
     async def _cleanup_inactive_connections(self):
         """清理不活跃的连接"""
@@ -173,7 +179,10 @@ class WebSocketManager:
     async def connect(self, websocket: WebSocket) -> str:
         """建立WebSocket连接"""
         connection_id = self.generate_connection_id(websocket)
-        
+
+        # 确保清理任务已启动
+        self._start_cleanup_task()
+
         # 存储连接
         self.active_connections[connection_id] = websocket
         
