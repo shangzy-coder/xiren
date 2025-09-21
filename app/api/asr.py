@@ -60,10 +60,10 @@ async def get_asr_status():
         model_info = get_model_info()
         
         return {
-            "status": "running" if model_info["initialized"] else "initializing",
-            "model_loaded": model_info["offline_recognizer"],
-            "vad_enabled": model_info["vad"],
-            "speaker_id_enabled": model_info["speaker_extractor"],
+            "status": "running" if model_info["is_initialized"] else "initializing",
+            "model_loaded": model_info["asr_loaded"],
+            "vad_enabled": model_info["vad_loaded"],
+            "speaker_id_enabled": model_info["speaker_loaded"],
             "sample_rate": model_info["sample_rate"],
             "max_workers": model_info["max_workers"],
             "version": "1.0.0"
@@ -152,7 +152,7 @@ async def transcribe_audio(
     """
     try:
         # 检查模型状态
-        if not get_model_info()["initialized"]:
+        if not get_model_info()["is_initialized"]:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="ASR模型未初始化，请先调用 /initialize 接口"
@@ -162,21 +162,45 @@ async def transcribe_audio(
         if not file.content_type.startswith('audio/'):
             logger.warning(f"上传文件类型可能不正确: {file.content_type}")
         
-        # 读取音频文件
-        audio_bytes = await file.read()
-        logger.info(f"接收到音频文件: {file.filename}, 大小: {len(audio_bytes)} bytes")
-        
-        # 将音频数据转换为numpy数组
-        # 注意：这里假设上传的是WAV格式的32位浮点音频
-        # 实际应用中可能需要使用librosa或其他库来处理各种格式
-        try:
-            audio_data = np.frombuffer(audio_bytes, dtype=np.float32)
-        except Exception:
-            # 如果直接转换失败，尝试其他方式
-            logger.warning("直接转换音频数据失败，需要音频格式转换")
+        # 验证文件格式
+        from app.utils.audio import audio_processor
+
+        if not audio_processor.is_supported_format(file.filename, file.content_type):
+            supported_formats = ", ".join(settings.SUPPORTED_FORMATS)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="不支持的音频格式，请上传WAV格式的音频文件"
+                detail=f"不支持的文件格式。支持的格式: {supported_formats}"
+            )
+
+        # 读取音频文件
+        audio_bytes = await file.read()
+        logger.info(f"接收到音频文件: {file.filename}, 大小: {len(audio_bytes)} bytes, 类型: {file.content_type}")
+
+        # 音频预处理：转换为模型所需的格式
+        try:
+            processed_audio = await audio_processor.convert_and_resample(
+                audio_bytes,
+                output_sample_rate=sample_rate or settings.SAMPLE_RATE
+            )
+
+            # 转换为numpy数组（跳过WAV文件头）
+            # WAV文件头通常是44字节，但为了安全起见，我们寻找数据块
+            import struct
+
+            # 简单的WAV解析：寻找'data'块
+            data_start = processed_audio.find(b'data')
+            if data_start != -1:
+                # 跳过'data'标识符(4字节)和数据大小(4字节)
+                audio_data = np.frombuffer(processed_audio[data_start + 8:], dtype=np.float32)
+            else:
+                # 如果找不到data块，尝试跳过标准WAV头
+                audio_data = np.frombuffer(processed_audio[44:], dtype=np.float32)
+
+        except Exception as e:
+            logger.error(f"音频预处理失败: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"音频文件处理失败: {str(e)}"
             )
         
         # 调用识别接口
@@ -227,7 +251,7 @@ async def transcribe_audio_async(
     """
     try:
         # 检查模型状态
-        if not get_model_info()["initialized"]:
+        if not get_model_info()["is_initialized"]:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="ASR模型未初始化，请先调用 /initialize 接口"
@@ -443,7 +467,7 @@ async def batch_transcribe_audio(
     """
     try:
         # 检查模型状态
-        if not get_model_info()["initialized"]:
+        if not get_model_info()["is_initialized"]:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="ASR模型未初始化，请先调用 /initialize 接口"
@@ -543,7 +567,7 @@ async def batch_transcribe_audio_async(
     """
     try:
         # 检查模型状态
-        if not get_model_info()["initialized"]:
+        if not get_model_info()["is_initialized"]:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="ASR模型未初始化，请先调用 /initialize 接口"
@@ -724,7 +748,7 @@ async def websocket_stream(websocket: WebSocket):
     
     try:
         # 检查模型状态
-        if not get_model_info()["initialized"]:
+        if not get_model_info()["is_initialized"]:
             await websocket.send_json({
                 "type": "error",
                 "message": "ASR模型未初始化，请先初始化模型"
@@ -842,16 +866,16 @@ async def health_check():
         # 检查关键组件状态
         health_status = {
             "service": "speech-recognition-asr",
-            "status": "healthy" if model_info["initialized"] else "degraded",
+            "status": "healthy" if model_info["is_initialized"] else "degraded",
             "components": {
-                "asr_model": "ok" if model_info["offline_recognizer"] else "unavailable",
-                "vad_model": "ok" if model_info["vad"] else "unavailable",
-                "speaker_id": "ok" if model_info["speaker_extractor"] else "unavailable"
+                "asr_model": "ok" if model_info["asr_loaded"] else "unavailable",
+                "vad_model": "ok" if model_info["vad_loaded"] else "unavailable",
+                "speaker_id": "ok" if model_info["speaker_loaded"] else "unavailable"
             },
             "version": "1.0.0"
         }
         
-        status_code = 200 if model_info["initialized"] else 503
+        status_code = 200 if model_info["is_initialized"] else 503
         
         return JSONResponse(
             status_code=status_code,

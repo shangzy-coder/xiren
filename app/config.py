@@ -31,7 +31,9 @@ class Settings:
     
     # FFmpeg配置
     FFMPEG_PATH: str = os.getenv("FFMPEG_PATH", "ffmpeg")
-    AUDIO_FORMATS: list = ["wav", "mp3", "flac", "m4a", "ogg"]
+    AUDIO_FORMATS: list = ["wav", "mp3", "flac", "m4a", "ogg", "mpga", "amr"]
+    VIDEO_FORMATS: list = ["mp4", "mov", "mpeg", "webm"]
+    SUPPORTED_FORMATS: list = AUDIO_FORMATS + VIDEO_FORMATS
     
     # 队列配置
     MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "4"))

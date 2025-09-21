@@ -113,11 +113,14 @@ async def register_speaker(
         metadata: 附加元数据 (JSON字符串)
     """
     try:
-        # 验证音频文件格式
-        if not audio_file.content_type.startswith('audio/'):
+        # 验证文件格式
+        from app.utils.audio import audio_processor
+
+        if not audio_processor.is_supported_format(audio_file.filename, audio_file.content_type):
+            supported_formats = ", ".join(settings.SUPPORTED_FORMATS)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="上传的文件不是音频格式"
+                detail=f"不支持的文件格式。支持的格式: {supported_formats}"
             )
         
         # 读取音频数据
@@ -204,11 +207,12 @@ async def identify_speaker(
         threshold: 相似度阈值
     """
     try:
-        # 验证音频文件格式
-        if not audio_file.content_type.startswith('audio/'):
+        # 验证文件格式
+        if not audio_processor.is_supported_format(audio_file.filename, audio_file.content_type):
+            supported_formats = ", ".join(settings.SUPPORTED_FORMATS)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="上传的文件不是音频格式"
+                detail=f"不支持的文件格式。支持的格式: {supported_formats}"
             )
         
         # 读取音频数据
@@ -279,11 +283,12 @@ async def speaker_diarization(
         num_speakers: 预期说话人数量 (-1为自动检测)
     """
     try:
-        # 验证音频文件格式
-        if not audio_file.content_type.startswith('audio/'):
+        # 验证文件格式
+        if not audio_processor.is_supported_format(audio_file.filename, audio_file.content_type):
+            supported_formats = ", ".join(settings.SUPPORTED_FORMATS)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="上传的文件不是音频格式"
+                detail=f"不支持的文件格式。支持的格式: {supported_formats}"
             )
         
         # 读取音频数据
@@ -443,11 +448,12 @@ async def search_speakers_by_voice(
         limit: 返回结果数量限制
     """
     try:
-        # 验证音频文件格式
-        if not audio_file.content_type.startswith('audio/'):
+        # 验证文件格式
+        if not audio_processor.is_supported_format(audio_file.filename, audio_file.content_type):
+            supported_formats = ", ".join(settings.SUPPORTED_FORMATS)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="上传的文件不是音频格式"
+                detail=f"不支持的文件格式。支持的格式: {supported_formats}"
             )
         
         # 读取音频数据

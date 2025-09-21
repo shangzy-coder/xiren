@@ -75,11 +75,14 @@ async def comprehensive_audio_processing(
     start_time = time.time()
     
     try:
-        # 验证音频文件
-        if not audio_file.content_type.startswith('audio/'):
+        # 验证文件格式
+        from app.utils.audio import audio_processor
+
+        if not audio_processor.is_supported_format(audio_file.filename, audio_file.content_type):
+            supported_formats = ", ".join(settings.SUPPORTED_FORMATS)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="上传的文件不是音频格式"
+                detail=f"不支持的文件格式。支持的格式: {supported_formats}"
             )
         
         logger.info(f"开始综合音频处理，会话ID: {session_id}")
@@ -374,11 +377,12 @@ async def quick_transcribe(
         language: 语言设置
     """
     try:
-        # 验证音频文件
-        if not audio_file.content_type.startswith('audio/'):
+        # 验证文件格式
+        if not audio_processor.is_supported_format(audio_file.filename, audio_file.content_type):
+            supported_formats = ", ".join(settings.SUPPORTED_FORMATS)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="上传的文件不是音频格式"
+                detail=f"不支持的文件格式。支持的格式: {supported_formats}"
             )
         
         # 读取音频数据
@@ -444,11 +448,12 @@ async def quick_speaker_identification(
         threshold: 相似度阈值
     """
     try:
-        # 验证音频文件
-        if not audio_file.content_type.startswith('audio/'):
+        # 验证文件格式
+        if not audio_processor.is_supported_format(audio_file.filename, audio_file.content_type):
+            supported_formats = ", ".join(settings.SUPPORTED_FORMATS)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="上传的文件不是音频格式"
+                detail=f"不支持的文件格式。支持的格式: {supported_formats}"
             )
         
         # 读取音频数据
