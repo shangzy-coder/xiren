@@ -146,7 +146,7 @@ class ASRModelManager:
                 self.offline_recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
                     model=str(model_path),
                     tokens=str(tokens_path),
-                    num_threads=settings.MAX_WORKERS,
+                    num_threads=settings.ASR_THREADS_PER_BATCH,
                     provider=provider,
                     language="auto",  # 自动检测语言
                     use_itn=True,     # 使用逆文本规范化
@@ -164,7 +164,7 @@ class ASRModelManager:
                 self.offline_recognizer = sherpa_onnx.OfflineRecognizer.from_paraformer(
                     paraformer=str(model_path),
                     tokens=str(tokens_path),
-                    num_threads=settings.MAX_WORKERS,
+                    num_threads=settings.ASR_THREADS_PER_BATCH,
                     sample_rate=settings.SAMPLE_RATE,
                     feature_dim=80,
                     decoding_method="greedy_search",
@@ -185,7 +185,7 @@ class ASRModelManager:
                     encoder=str(encoder_path),
                     decoder=str(decoder_path),
                     tokens=str(tokens_path),
-                    num_threads=settings.MAX_WORKERS,
+                    num_threads=settings.ASR_THREADS_PER_BATCH,
                     decoding_method="greedy_search",
                     language="",  # 自动检测
                     task="transcribe",
@@ -279,7 +279,7 @@ class ASRModelManager:
             # 创建标点符号处理器配置
             config = sherpa_onnx.OfflinePunctuationConfig()
             config.model.ct_transformer = str(model_file)
-            config.model.num_threads = settings.MAX_WORKERS
+            config.model.num_threads = settings.PUNCTUATION_THREADS_PER_BATCH
             config.model.provider = provider
             config.model.debug = False
 
@@ -297,7 +297,8 @@ class ASRModelManager:
         audio_data: Union[np.ndarray, bytes],
         sample_rate: int = None,
         enable_vad: bool = True,
-        enable_speaker_id: bool = False
+        enable_speaker_id: bool = False,
+        enable_punctuation: bool = True
     ) -> Dict[str, Any]:
         """
         异步音频识别接口
@@ -307,7 +308,8 @@ class ASRModelManager:
             sample_rate: 采样率，如果为None则使用默认值
             enable_vad: 是否启用VAD语音段落分割
             enable_speaker_id: 是否启用声纹识别
-            
+            enable_punctuation: 是否启用标点符号处理
+
         Returns:
             识别结果字典，包含文本、时间戳、声纹等信息
         """
@@ -326,27 +328,26 @@ class ASRModelManager:
         if sample_rate is None:
             sample_rate = settings.SAMPLE_RATE
             
-        # 在线程池中执行推理
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            self._thread_pool,
-            self._perform_recognition,
+        # 执行异步推理
+        result = await self._perform_recognition(
             audio_samples,
             sample_rate,
             enable_vad,
-            enable_speaker_id
+            enable_speaker_id,
+            enable_punctuation
         )
         
         return result
 
-    def _perform_recognition(
+    async def _perform_recognition(
         self,
         audio_samples: np.ndarray,
         sample_rate: int,
         enable_vad: bool,
-        enable_speaker_id: bool
+        enable_speaker_id: bool,
+        enable_punctuation: bool = True
     ) -> Dict[str, Any]:
-        """执行同步识别推理"""
+        """执行异步识别推理"""
         
         start_time = time.time()
         
@@ -363,35 +364,14 @@ class ASRModelManager:
                     'end_time': len(audio_samples) / sample_rate
                 }]
             
-            # 批量识别所有段落
-            results = []
-            for segment in segments:
-                # 创建识别流
-                stream = self.offline_recognizer.create_stream()
-                stream.accept_waveform(segment['sample_rate'], segment['samples'])
-                
-                # 执行识别
-                self.offline_recognizer.decode_stream(stream)
-                result = stream.result
-                
-                segment_result = {
-                    'text': result.text,
-                    'start_time': segment['start_time'],
-                    'end_time': segment['end_time'],
-                    'language': getattr(result, 'lang', 'unknown'),
-                    'emotion': getattr(result, 'emotion', 'unknown'),
-                    'event': getattr(result, 'event', 'unknown')
-                }
-                
-                # 添加声纹识别
-                if enable_speaker_id and self.speaker_extractor is not None:
-                    speaker_info = self._identify_speaker(segment['samples'], segment['sample_rate'])
-                    segment_result['speaker'] = speaker_info
-                else:
-                    segment_result['speaker'] = 'unknown'
-                    
-                results.append(segment_result)
-            
+            # 并行批量识别所有段落（包含标点符号处理）
+            results = await self._parallel_recognize_segments(
+                segments,
+                enable_speaker_id,
+                enable_punctuation,  # 在并行处理中直接处理标点符号
+                max_workers=4  # 使用4个线程并行处理
+            )
+
             # 计算处理统计信息
             total_duration = len(audio_samples) / sample_rate
             processing_time = time.time() - start_time
@@ -418,12 +398,12 @@ class ASRModelManager:
             }
 
     def _segment_audio_with_vad(
-        self, 
-        audio_samples: np.ndarray, 
+        self,
+        audio_samples: np.ndarray,
         sample_rate: int
     ) -> List[Dict[str, Any]]:
-        """使用VAD分割音频"""
-        
+        """使用VAD分割音频 - 参考demo实现"""
+
         if self.vad is None:
             # VAD不可用，返回整段音频
             return [{
@@ -432,53 +412,70 @@ class ASRModelManager:
                 'start_time': 0.0,
                 'end_time': len(audio_samples) / sample_rate
             }]
-        
+
         segments = []
-        window_size = 1600  # 假设16kHz下100ms窗口
-        total_samples_processed = 0
-        
+
         try:
-            # 逐窗口处理音频
-            while total_samples_processed < len(audio_samples):
-                end_idx = min(total_samples_processed + window_size, len(audio_samples))
-                chunk = audio_samples[total_samples_processed:end_idx]
-                
-                self.vad.accept_waveform(chunk)
-                total_samples_processed = end_idx
-                
+            # 重新创建VAD实例以确保状态清零
+            # 这是关键：每次处理新音频时都重新创建VAD，避免累积时间戳问题
+            vad_config = sherpa_onnx.VadModelConfig()
+            vad_config.silero_vad.model = str(Path(settings.VAD_MODEL_PATH))
+            vad_config.silero_vad.threshold = 0.5
+            vad_config.silero_vad.min_silence_duration = 0.25  # 最小静音时长（秒）
+            vad_config.silero_vad.min_speech_duration = 0.25   # 最小语音时长（秒）
+            vad_config.silero_vad.max_speech_duration = 5.0    # 最大语音时长（秒）
+            vad_config.sample_rate = sample_rate
+            vad_config.num_threads = 2
+            vad_config.provider = "cpu"  # VAD通常用CPU就足够了
+
+            # 创建新的VAD实例
+            fresh_vad = sherpa_onnx.VoiceActivityDetector(vad_config, buffer_size_in_seconds=30)
+
+            # 获取窗口大小
+            window_size = vad_config.silero_vad.window_size
+            total_samples_processed = 0
+
+            logger.debug(f"开始VAD分割，音频长度: {len(audio_samples)}，窗口大小: {window_size}")
+
+            # 处理音频数据 - 使用完整窗口
+            while len(audio_samples) > total_samples_processed + window_size:
+                chunk = audio_samples[total_samples_processed:total_samples_processed + window_size]
+                fresh_vad.accept_waveform(chunk)
+                total_samples_processed += window_size
+
                 # 获取检测到的语音段落
-                while not self.vad.empty():
-                    segment_samples = self.vad.front.samples
-                    start_time = self.vad.front.start / sample_rate
+                while not fresh_vad.empty():
+                    segment_samples = fresh_vad.front.samples
+                    start_time = fresh_vad.front.start / sample_rate  # 这里的start是相对于音频开始的采样点数
                     duration = len(segment_samples) / sample_rate
                     end_time = start_time + duration
-                    
+
                     segments.append({
                         'samples': segment_samples,
                         'sample_rate': sample_rate,
                         'start_time': start_time,
                         'end_time': end_time
                     })
-                    
-                    self.vad.pop()
-            
-            # 处理剩余音频
-            self.vad.flush()
-            while not self.vad.empty():
-                segment_samples = self.vad.front.samples
-                start_time = self.vad.front.start / sample_rate
+
+                    fresh_vad.pop()
+
+            # 处理剩余的音频数据
+            fresh_vad.flush()
+            while not fresh_vad.empty():
+                segment_samples = fresh_vad.front.samples
+                start_time = fresh_vad.front.start / sample_rate
                 duration = len(segment_samples) / sample_rate
                 end_time = start_time + duration
-                
+
                 segments.append({
                     'samples': segment_samples,
                     'sample_rate': sample_rate,
                     'start_time': start_time,
                     'end_time': end_time
                 })
-                
-                self.vad.pop()
-                
+
+                fresh_vad.pop()
+
         except Exception as e:
             logger.error(f"VAD分割失败: {e}")
             # 分割失败，返回整段音频
@@ -488,9 +485,178 @@ class ASRModelManager:
                 'start_time': 0.0,
                 'end_time': len(audio_samples) / sample_rate
             }]
-        
-        logger.debug(f"VAD分割完成，得到 {len(segments)} 个语音段落")
+
+        logger.info(f"VAD分割完成，得到 {len(segments)} 个语音段落")
         return segments
+
+    async def _parallel_recognize_segments(
+        self,
+        segments: List[Dict[str, Any]],
+        enable_speaker_id: bool,
+        enable_punctuation: bool = True,
+        max_workers: int = 4
+    ) -> List[Dict[str, Any]]:
+        """并行处理多个音频段落的识别 - 参考demo实现"""
+
+        if not segments:
+            return []
+
+        total_segments = len(segments)
+        logger.info(f"开始并行处理 {total_segments} 个音频段落")
+
+        # 使用配置文件中的参数动态计算批次大小和线程数
+        if total_segments <= 10:
+            # 小量数据：直接处理，不分批
+            batch_size = total_segments
+            max_workers = 1
+        else:
+            # 根据配置计算批次大小
+            batch_size = max(
+                settings.MIN_BATCH_SIZE,
+                min(settings.MAX_BATCH_SIZE, total_segments // settings.MAX_BATCH_THREADS)
+            )
+
+            # 根据配置限制最大线程数
+            max_workers = min(
+                settings.MAX_BATCH_THREADS,
+                max(1, total_segments // batch_size + 1)
+            )
+
+        logger.info(f"🚀 使用 {max_workers} 个线程并行处理，批次大小: {batch_size}")
+        logger.info(f"📊 配置参数: ASR线程={settings.ASR_THREADS_PER_BATCH}, 标点线程={settings.PUNCTUATION_THREADS_PER_BATCH}")
+
+        # 创建批次任务
+        batch_tasks = []
+        for start_idx in range(0, total_segments, batch_size):
+            end_idx = min(start_idx + batch_size, total_segments)
+            current_batch = segments[start_idx:end_idx]
+            batch_tasks.append((current_batch, start_idx))
+
+        logger.info(f"📦 创建了 {len(batch_tasks)} 个批次")
+
+        # 使用asyncio在线程池中并行处理所有批次
+        loop = asyncio.get_event_loop()
+        all_results = []
+
+        # 创建所有批次的并行任务
+        batch_futures = []
+        for batch_idx, (batch, start_idx) in enumerate(batch_tasks):
+            future = loop.run_in_executor(
+                self._thread_pool,
+                self._process_batch,
+                batch,
+                start_idx,
+                batch_idx + 1,
+                len(batch_tasks),
+                enable_speaker_id,
+                enable_punctuation
+            )
+            batch_futures.append(future)
+
+        # 等待所有批次完成
+        logger.info(f"⏳ 等待所有 {len(batch_futures)} 个批次完成...")
+        batch_results = await asyncio.gather(*batch_futures, return_exceptions=True)
+
+        # 收集结果
+        for i, result in enumerate(batch_results):
+            if isinstance(result, Exception):
+                logger.error(f"批次 {i+1} 处理失败: {result}")
+            else:
+                all_results.extend(result)
+
+        # 按时间戳排序结果
+        all_results.sort(key=lambda x: x['start_time'])
+
+        logger.info(f"🎉 并行处理完成，成功处理 {len(all_results)} 个段落")
+        return all_results
+
+    def _process_batch(
+        self,
+        batch_segments: List[Dict[str, Any]],
+        start_idx: int,
+        batch_idx: int,
+        total_batches: int,
+        enable_speaker_id: bool,
+        enable_punctuation: bool
+    ) -> List[Dict[str, Any]]:
+        """处理单个批次的语音段落 - 参考demo实现"""
+
+        batch_start_time = time.time()
+        logger.info(f"🔄 处理批次 {batch_idx}/{total_batches}，包含 {len(batch_segments)} 个段落")
+
+        try:
+            # 创建识别流 - 预分配内存
+            streams = []
+            for segment in batch_segments:
+                stream = self.offline_recognizer.create_stream()
+                stream.accept_waveform(segment['sample_rate'], segment['samples'])
+                streams.append(stream)
+
+            # 批量识别 - 这是真正的并行处理
+            self.offline_recognizer.decode_streams(streams)
+
+            # 批量获取结果
+            batch_results = []
+            for i, stream in enumerate(streams):
+                result = stream.result
+                segment = batch_segments[i]
+
+                # 准备基础结果
+                result_data = {
+                    'text': result.text,
+                    'start_time': segment['start_time'],
+                    'end_time': segment['end_time'],
+                    'language': getattr(result, 'lang', 'unknown'),
+                    'emotion': getattr(result, 'emotion', 'unknown'),
+                    'event': getattr(result, 'event', 'unknown'),
+                    'speaker': 'unknown'
+                }
+
+                # 添加声纹识别
+                if enable_speaker_id and self.speaker_extractor is not None:
+                    speaker_info = self._identify_speaker(segment['samples'], segment['sample_rate'])
+                    result_data['speaker'] = speaker_info
+
+                # 在单个段落级别添加标点符号处理
+                if enable_punctuation and self.punctuation_processor is not None and result_data['text'].strip():
+                    try:
+                        punctuated_text = self.punctuation_processor.add_punctuation(result_data['text'])
+                        result_data['text_with_punct'] = punctuated_text
+                        result_data['text'] = punctuated_text  # 更新主要文本字段
+                    except Exception as e:
+                        logger.warning(f"段落标点处理失败: {e}")
+                        result_data['text_with_punct'] = result_data['text']
+                else:
+                    result_data['text_with_punct'] = result_data['text']
+
+                batch_results.append(result_data)
+
+            batch_time = time.time() - batch_start_time
+            logger.info(f"✅ 批次 {batch_idx} 完成，耗时 {batch_time:.2f}秒")
+
+            return batch_results
+
+        except Exception as e:
+            logger.error(f"批次 {batch_idx} 处理失败: {e}")
+            # 返回错误占位结果
+            error_results = []
+            for segment in batch_segments:
+                error_result = {
+                    'text': '',
+                    'start_time': segment['start_time'],
+                    'end_time': segment['end_time'],
+                    'language': 'unknown',
+                    'emotion': 'unknown',
+                    'event': 'unknown',
+                    'speaker': 'unknown',
+                    'text_with_punct': '',
+                    'error': str(e)
+                }
+                error_results.append(error_result)
+            return error_results
+
+
+
 
     def _identify_speaker(self, audio_samples: np.ndarray, sample_rate: int) -> str:
         """识别说话人"""

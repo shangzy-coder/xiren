@@ -366,7 +366,8 @@ class WebSocketManager:
                 audio_data=audio_samples,
                 sample_rate=settings.SAMPLE_RATE,
                 enable_vad=True,
-                enable_speaker_id=True
+                enable_speaker_id=True,
+                enable_punctuation=True  # 默认启用标点符号
             )
             
             # 发送结果

@@ -452,7 +452,8 @@ async def _process_asr(pipeline_id: str, audio_segments: List[Dict], sample_rate
                 audio_data=audio_data,
                 sample_rate=sample_rate,
                 enable_vad=False,  # 已经做过VAD了
-                enable_speaker_id=False  # 在后续阶段处理
+                enable_speaker_id=False,  # 在后续阶段处理
+                enable_punctuation=True  # 默认启用标点符号
             )
             
             if result["success"]:

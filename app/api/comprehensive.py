@@ -204,7 +204,8 @@ async def _process_asr(audio_array: np.ndarray, enable_vad: bool, language: str)
             audio_data=audio_array,
             sample_rate=settings.SAMPLE_RATE,
             enable_vad=enable_vad,
-            enable_speaker_id=False  # 在声纹分析中单独处理
+            enable_speaker_id=False,  # 在声纹分析中单独处理
+            enable_punctuation=True  # 默认启用标点符号
         )
         
         if result["success"]:
@@ -403,7 +404,8 @@ async def quick_transcribe(
             audio_data=audio_array,
             sample_rate=settings.SAMPLE_RATE,
             enable_vad=True,
-            enable_speaker_id=False
+            enable_speaker_id=False,
+            enable_punctuation=True  # 默认启用标点符号
         )
         
         if result["success"]:

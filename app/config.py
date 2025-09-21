@@ -38,7 +38,7 @@ class Settings:
     # 队列配置
     MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "4"))
     QUEUE_SIZE: int = int(os.getenv("QUEUE_SIZE", "100"))
-    
+
     # 并发处理配置
     THREAD_POOL_SIZE: int = int(os.getenv("THREAD_POOL_SIZE", "8"))
     MAX_QUEUE_SIZE: int = int(os.getenv("MAX_QUEUE_SIZE", "1000"))
@@ -46,6 +46,13 @@ class Settings:
     TASK_TIMEOUT: int = int(os.getenv("TASK_TIMEOUT", "300"))  # 5分钟
     MAX_CONCURRENT_REQUESTS: int = int(os.getenv("MAX_CONCURRENT_REQUESTS", "50"))
     BATCH_SIZE_LIMIT: int = int(os.getenv("BATCH_SIZE_LIMIT", "10"))
+
+    # 批次处理性能配置
+    MAX_BATCH_THREADS: int = int(os.getenv("MAX_BATCH_THREADS", "4"))  # 最大批次线程数
+    MIN_BATCH_SIZE: int = int(os.getenv("MIN_BATCH_SIZE", "20"))  # 最小批次大小
+    MAX_BATCH_SIZE: int = int(os.getenv("MAX_BATCH_SIZE", "100"))  # 最大批次大小
+    ASR_THREADS_PER_BATCH: int = int(os.getenv("ASR_THREADS_PER_BATCH", "2"))  # 每个批次的ASR线程数
+    PUNCTUATION_THREADS_PER_BATCH: int = int(os.getenv("PUNCTUATION_THREADS_PER_BATCH", "2"))  # 每个批次的标点线程数
     
     # 设备配置
     DEVICE_TYPE: str = os.getenv("DEVICE_TYPE", "auto")  # auto, cpu, gpu

@@ -208,7 +208,8 @@ async def transcribe_audio(
             audio_data=audio_data,
             sample_rate=sample_rate or settings.SAMPLE_RATE,
             enable_vad=enable_vad,
-            enable_speaker_id=enable_speaker_id
+            enable_speaker_id=enable_speaker_id,
+            enable_punctuation=True  # 默认启用标点符号
         )
         
         if result["success"]:
@@ -344,7 +345,8 @@ async def _process_asr_task(audio_data: bytes,
             audio_data=audio_array,
             sample_rate=sample_rate or settings.SAMPLE_RATE,
             enable_vad=enable_vad,
-            enable_speaker_id=enable_speaker_id
+            enable_speaker_id=enable_speaker_id,
+            enable_punctuation=True  # 默认启用标点符号
         )
         
         # 添加文件信息
@@ -499,7 +501,8 @@ async def batch_transcribe_audio(
                     audio_data=audio_data,
                     sample_rate=settings.SAMPLE_RATE,
                     enable_vad=enable_vad,
-                    enable_speaker_id=enable_speaker_id
+                    enable_speaker_id=enable_speaker_id,
+                    enable_punctuation=True  # 默认启用标点符号
                 )
                 
                 if result["success"]:
@@ -681,7 +684,8 @@ async def _process_batch_asr_task(batch_data: list) -> Dict[str, Any]:
                     audio_data=audio_array,
                     sample_rate=file_data["sample_rate"] or settings.SAMPLE_RATE,
                     enable_vad=file_data["enable_vad"],
-                    enable_speaker_id=file_data["enable_speaker_id"]
+                    enable_speaker_id=file_data["enable_speaker_id"],
+                    enable_punctuation=True  # 默认启用标点符号
                 )
                 
                 # 添加文件信息
@@ -789,7 +793,8 @@ async def websocket_stream(websocket: WebSocket):
                             audio_data=recognition_samples,
                             sample_rate=settings.SAMPLE_RATE,
                             enable_vad=True,
-                            enable_speaker_id=True
+                            enable_speaker_id=True,
+                            enable_punctuation=True  # 默认启用标点符号
                         )
                         
                         if result["success"] and result["results"]:
@@ -812,7 +817,8 @@ async def websocket_stream(websocket: WebSocket):
                             audio_data=final_samples,
                             sample_rate=settings.SAMPLE_RATE,
                             enable_vad=True,
-                            enable_speaker_id=True
+                            enable_speaker_id=True,
+                            enable_punctuation=True  # 默认启用标点符号
                         )
                         
                         if result["success"] and result["results"]:
