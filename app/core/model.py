@@ -93,6 +93,9 @@ class ASRModelManager:
                 enable_punctuation
             )
             
+            # 保存初始化参数
+            self._model_type = model_type
+            self._use_gpu = use_gpu
             self._is_initialized = True
             elapsed = time.time() - start_time
             logger.info(f"模型初始化完成，耗时: {elapsed:.2f}秒")
@@ -134,7 +137,7 @@ class ASRModelManager:
         try:
             if model_type == "sense_voice":
                 # SenseVoice模型 - 支持中英日韩粤多语言
-                model_path = Path(settings.ASR_MODEL_PATH) / "model.onnx"
+                model_path = Path(settings.ASR_MODEL_PATH) / "model.int8.onnx"
                 tokens_path = Path(settings.ASR_MODEL_PATH) / "tokens.txt"
                 
                 if not model_path.exists() or not tokens_path.exists():
@@ -205,8 +208,7 @@ class ASRModelManager:
             vad_model_path = Path(settings.VAD_MODEL_PATH)
             
             if not vad_model_path.exists():
-                logger.warning(f"VAD模型文件不存在: {vad_model_path}")
-                return
+                raise FileNotFoundError(f"VAD模型文件不存在: {vad_model_path}")
                 
             # 创建VAD配置
             config = sherpa_onnx.VadModelConfig()
@@ -228,7 +230,7 @@ class ASRModelManager:
             
         except Exception as e:
             logger.error(f"加载VAD模型失败: {e}")
-            # VAD失败不影响主要功能，继续运行
+            raise ModelLoadError(f"Failed to load VAD model: {e}")
 
     def _load_speaker_models(self, provider: str) -> None:
         """加载声纹识别模型"""
@@ -236,8 +238,7 @@ class ASRModelManager:
             speaker_model_path = Path(settings.SPEAKER_MODEL_PATH)
             
             if not speaker_model_path.exists():
-                logger.warning(f"声纹模型文件不存在: {speaker_model_path}")
-                return
+                raise FileNotFoundError(f"声纹模型文件不存在: {speaker_model_path}")
                 
             # 创建声纹嵌入提取器
             config = sherpa_onnx.SpeakerEmbeddingExtractorConfig()
@@ -256,17 +257,40 @@ class ASRModelManager:
             
         except Exception as e:
             logger.error(f"加载声纹识别模型失败: {e}")
-            # 声纹识别失败不影响主要功能
+            raise ModelLoadError(f"Failed to load speaker model: {e}")
 
     def _load_punctuation_model(self, provider: str) -> None:
         """加载标点符号处理模型"""
         try:
-            # 这里暂时跳过标点符号模型加载
-            # 可以根据需要添加具体的标点符号模型
-            logger.info("标点符号处理模型暂未配置")
-            
+            punctuation_model_path = Path(settings.PUNCTUATION_MODEL_PATH)
+
+            if not punctuation_model_path.exists():
+                raise FileNotFoundError(f"标点符号模型目录不存在: {punctuation_model_path}")
+
+            # 检查模型文件
+            model_file = punctuation_model_path / "model.int8.onnx"
+            tokens_file = punctuation_model_path / "tokens.json"
+
+            if not model_file.exists():
+                raise FileNotFoundError(f"标点符号模型文件不存在: {model_file}")
+            if not tokens_file.exists():
+                raise FileNotFoundError(f"标点符号tokens文件不存在: {tokens_file}")
+
+            # 创建标点符号处理器配置
+            config = sherpa_onnx.OfflinePunctuationConfig()
+            config.model.ct_transformer = str(model_file)
+            config.model.num_threads = settings.MAX_WORKERS
+            config.model.provider = provider
+            config.model.debug = False
+
+            # 创建标点符号处理器
+            self.punctuation_processor = sherpa_onnx.OfflinePunctuation(config)
+
+            logger.info(f"标点符号处理模型加载成功: {model_file}")
+
         except Exception as e:
             logger.error(f"加载标点符号模型失败: {e}")
+            raise ModelLoadError(f"Failed to load punctuation model: {e}")
 
     async def recognize_audio(
         self,
@@ -574,14 +598,20 @@ class ASRModelManager:
     def get_model_info(self) -> Dict[str, Any]:
         """获取模型信息"""
         return {
-            'initialized': self._is_initialized,
-            'offline_recognizer': self.offline_recognizer is not None,
-            'vad': self.vad is not None,
-            'speaker_extractor': self.speaker_extractor is not None,
-            'speaker_manager': self.speaker_manager is not None,
-            'punctuation_processor': self.punctuation_processor is not None,
+            'is_initialized': self._is_initialized,
+            'model_type': getattr(self, '_model_type', 'none'),
+            'use_gpu': getattr(self, '_use_gpu', False),
+            'asr_loaded': self.offline_recognizer is not None,
+            'vad_loaded': self.vad is not None,
+            'speaker_loaded': self.speaker_extractor is not None and self.speaker_manager is not None,
+            'punctuation_loaded': self.punctuation_processor is not None,
             'sample_rate': settings.SAMPLE_RATE,
-            'max_workers': settings.MAX_WORKERS
+            'max_workers': settings.MAX_WORKERS,
+            'models_dir': settings.MODELS_DIR,
+            'asr_model_path': settings.ASR_MODEL_PATH,
+            'vad_model_path': settings.VAD_MODEL_PATH,
+            'speaker_model_path': settings.SPEAKER_MODEL_PATH,
+            'punctuation_model_path': settings.PUNCTUATION_MODEL_PATH
         }
 
     async def cleanup(self) -> None:

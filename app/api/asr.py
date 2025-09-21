@@ -86,7 +86,7 @@ async def initialize_asr_models(
 ):
     """
     初始化ASR模型
-    
+
     Args:
         model_type: 模型类型 (sense_voice, paraformer, whisper)
         use_gpu: 是否使用GPU加速
@@ -95,8 +95,21 @@ async def initialize_asr_models(
         enable_punctuation: 是否启用标点处理
     """
     try:
+        # 获取当前模型状态
+        current_info = get_model_info()
+
+        # 检查模型是否已经初始化
+        if current_info.get("is_initialized", False):
+            logger.info(f"模型已初始化，当前状态: {current_info}")
+            return ASRResponse(
+                success=True,
+                message=f"模型已初始化 (当前: {current_info.get('model_type', 'unknown')})",
+                results=[],
+                statistics=current_info
+            )
+
         logger.info(f"开始初始化ASR模型: {model_type}")
-        
+
         await initialize_models(
             model_type=model_type,
             use_gpu=use_gpu,
@@ -104,7 +117,7 @@ async def initialize_asr_models(
             enable_speaker_id=enable_speaker_id,
             enable_punctuation=enable_punctuation
         )
-        
+
         return ASRResponse(
             success=True,
             message=f"ASR模型 {model_type} 初始化成功",

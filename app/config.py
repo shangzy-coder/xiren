@@ -24,9 +24,10 @@ class Settings:
     
     # 模型配置
     MODELS_DIR: str = os.getenv("MODELS_DIR", "./models")
-    ASR_MODEL_PATH: str = os.getenv("ASR_MODEL_PATH", "./models/asr_model")
-    SPEAKER_MODEL_PATH: str = os.getenv("SPEAKER_MODEL_PATH", "./models/speaker_model.onnx")
-    VAD_MODEL_PATH: str = os.getenv("VAD_MODEL_PATH", "./models/vad_model.onnx")
+    ASR_MODEL_PATH: str = os.getenv("ASR_MODEL_PATH", "./models/asr/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09")
+    SPEAKER_MODEL_PATH: str = os.getenv("SPEAKER_MODEL_PATH", "./models/speaker-recongition/3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k.onnx")
+    VAD_MODEL_PATH: str = os.getenv("VAD_MODEL_PATH", "./models/vad/silero_vad.onnx")
+    PUNCTUATION_MODEL_PATH: str = os.getenv("PUNCTUATION_MODEL_PATH", "./models/punction/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8")
     
     # FFmpeg配置
     FFMPEG_PATH: str = os.getenv("FFMPEG_PATH", "ffmpeg")
@@ -59,6 +60,14 @@ class Settings:
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")  # development, production
     
+    # 模型预加载配置
+    ENABLE_MODEL_PRELOAD: bool = os.getenv("ENABLE_MODEL_PRELOAD", "true").lower() == "true"
+    DEFAULT_MODEL_TYPE: str = os.getenv("DEFAULT_MODEL_TYPE", "sense_voice")
+    DEFAULT_USE_GPU: bool = os.getenv("DEFAULT_USE_GPU", "false").lower() == "true"
+    DEFAULT_ENABLE_VAD: bool = os.getenv("DEFAULT_ENABLE_VAD", "true").lower() == "true"
+    DEFAULT_ENABLE_SPEAKER_ID: bool = os.getenv("DEFAULT_ENABLE_SPEAKER_ID", "true").lower() == "true"
+    DEFAULT_ENABLE_PUNCTUATION: bool = os.getenv("DEFAULT_ENABLE_PUNCTUATION", "true").lower() == "true"
+
     # 监控配置
     ENABLE_METRICS: bool = os.getenv("ENABLE_METRICS", "false").lower() == "true"
     METRICS_PORT: int = int(os.getenv("METRICS_PORT", "8001"))

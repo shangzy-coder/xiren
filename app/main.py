@@ -14,6 +14,7 @@ from app.config import settings
 from app.core.queue import get_queue_manager, shutdown_queue_manager
 from app.core.request_manager import get_request_manager
 from app.core.websocket_manager import cleanup_websocket_manager
+from app.core.model import initialize_models, get_model_info
 from app.services.db import initialize_database
 
 # 导入新的日志和监控模块
@@ -132,12 +133,25 @@ async def health_check():
         # 获取请求管理器状态
         request_manager = await get_request_manager()
         health_status = request_manager.get_health_status()
-        
+
+        # 获取模型状态
+        model_info = get_model_info()
+
         return {
             "status": health_status["status"],
-            "service": "speech-recognition-service", 
+            "service": "speech-recognition-service",
             "version": "0.1.0",
             "models_dir": settings.MODELS_DIR,
+            "model_status": {
+                "is_initialized": model_info.get("is_initialized", False),
+                "model_type": model_info.get("model_type", "none"),
+                "asr_loaded": model_info.get("asr_loaded", False),
+                "vad_loaded": model_info.get("vad_loaded", False),
+                "speaker_loaded": model_info.get("speaker_loaded", False),
+                "punctuation_loaded": model_info.get("punctuation_loaded", False),
+                "use_gpu": model_info.get("use_gpu", False),
+                "preload_enabled": settings.ENABLE_MODEL_PRELOAD
+            },
             "queue_health": health_status,
             "concurrent_config": {
                 "max_workers": settings.THREAD_POOL_SIZE,
@@ -187,15 +201,39 @@ async def startup_event():
         logger.info("正在初始化请求管理器...")
         request_manager = await get_request_manager()
         logger.info("请求管理器初始化成功")
-        
+
+        # 预加载模型（如果启用）
+        if settings.ENABLE_MODEL_PRELOAD:
+            logger.info("正在预加载模型...")
+            try:
+                await initialize_models(
+                    model_type=settings.DEFAULT_MODEL_TYPE,
+                    use_gpu=settings.DEFAULT_USE_GPU,
+                    enable_vad=settings.DEFAULT_ENABLE_VAD,
+                    enable_speaker_id=settings.DEFAULT_ENABLE_SPEAKER_ID,
+                    enable_punctuation=settings.DEFAULT_ENABLE_PUNCTUATION
+                )
+                logger.info("模型预加载完成",
+                           model_type=settings.DEFAULT_MODEL_TYPE,
+                           use_gpu=settings.DEFAULT_USE_GPU,
+                           enable_vad=settings.DEFAULT_ENABLE_VAD,
+                           enable_speaker_id=settings.DEFAULT_ENABLE_SPEAKER_ID,
+                           enable_punctuation=settings.DEFAULT_ENABLE_PUNCTUATION)
+            except Exception as e:
+                logger.error("模型预加载失败，服务将退出", error=str(e), error_type=type(e).__name__)
+                raise
+        else:
+            logger.info("模型预加载已禁用，需要手动初始化模型")
+
         # 启动系统指标更新任务
         if settings.ENABLE_SYSTEM_METRICS:
             asyncio.create_task(update_system_metrics_task())
             logger.info("系统指标更新任务已启动")
-        
-        logger.info("语音识别服务启动完成", 
+
+        logger.info("语音识别服务启动完成",
                    enable_metrics=settings.ENABLE_METRICS,
-                   enable_system_metrics=settings.ENABLE_SYSTEM_METRICS)
+                   enable_system_metrics=settings.ENABLE_SYSTEM_METRICS,
+                   model_preload=settings.ENABLE_MODEL_PRELOAD)
         
     except Exception as e:
         logger.error("服务启动失败", error=str(e), error_type=type(e).__name__)
