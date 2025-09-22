@@ -1,6 +1,6 @@
 # Task ID: 3
 # Title: 批次处理架构优化
-# Status: pending
+# Status: done
 # Dependencies: None
 # Priority: high
 # Description: 优化现有批次处理流程，实现二阶段并行处理
@@ -16,19 +16,19 @@
 性能压力测试验证30-50%的性能提升目标，并发测试验证结果一致性
 
 # Subtasks:
-## 1. 设计二阶段处理架构 [pending]
+## 1. 设计二阶段处理架构 [done]
 ### Dependencies: None
 ### Description: 设计优化后的批次处理流程架构
 ### Details:
 设计处理架构：\n1. 设计阶段1：ASR批次并行架构\n2. 设计阶段2：后处理并行架构\n3. 定义阶段间数据传递格式\n4. 设计资源调度策略\n5. 定义性能监控指标
 
-## 2. 分析现有批次处理逻辑 [pending]
+## 2. 分析现有批次处理逻辑 [done]
 ### Dependencies: None
 ### Description: 分析现有的 _parallel_recognize_segments 方法
 ### Details:
 分析现有实现：\n1. 分析当前批次处理性能瓶颈\n2. 识别并行处理的限制因素\n3. 分析资源利用率\n4. 评估优化潜力\n5. 设计迁移方案
 
-## 3. 设计批次划分策略 [pending]
+## 3. 设计批次划分策略 [done]
 ### Dependencies: None
 ### Description: 设计智能的批次划分和调度策略
 ### Details:

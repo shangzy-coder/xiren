@@ -364,14 +364,60 @@
         "id": 5,
         "title": "数据库表结构扩展",
         "description": "扩展数据库表以支持 MinIO 对象存储元数据",
-        "status": "pending",
+        "status": "done",
         "priority": "medium",
         "dependencies": [
           1
         ],
         "details": "根据 PRD 第3.1.3节执行数据库迁移：\n1. 扩展 audio_files 表添加 MinIO 相关字段\n2. 创建 file_versions 表支持版本管理\n3. 添加必要的索引优化查询性能\n4. 创建数据迁移脚本\n5. 验证数据完整性",
         "testStrategy": "数据库迁移测试，数据完整性验证，查询性能测试",
-        "subtasks": []
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "扩展 audio_files 表添加 MinIO 字段",
+            "description": "为 audio_files 表添加 MinIO 存储相关的字段，包括存储桶、对象路径、哈希值等",
+            "details": "添加以下字段到 audio_files 表：\\n- bucket: VARCHAR(100) - MinIO存储桶名称\\n- object_name: VARCHAR(1000) - MinIO对象名称\\n- sha256_hash: VARCHAR(64) - 文件哈希值用于去重\\n- content_type: VARCHAR(200) - 文件MIME类型\\n- minio_version_id: VARCHAR(255) - MinIO版本ID（如果启用版本控制）\\n- storage_class: VARCHAR(50) - 存储类别\\n- file_tags: JSONB - 文件标签",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 5
+          },
+          {
+            "id": 2,
+            "title": "创建 file_versions 表",
+            "description": "创建新表支持文件版本管理功能",
+            "details": "创建 file_versions 表包含以下字段：\\n- id: SERIAL PRIMARY KEY\\n- audio_file_id: INTEGER REFERENCES audio_files(id)\\n- version_number: INTEGER\\n- bucket: VARCHAR(100)\\n- object_name: VARCHAR(1000)\\n- file_size: BIGINT\\n- sha256_hash: VARCHAR(64)\\n- version_id: VARCHAR(255)\\n- is_current: BOOLEAN DEFAULT false\\n- created_at: TIMESTAMP WITH TIME ZONE\\n- metadata: JSONB",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 5
+          },
+          {
+            "id": 3,
+            "title": "添加数据库索引优化查询",
+            "description": "为新添加的字段创建必要的索引以优化查询性能",
+            "details": "创建以下索引：\\n- idx_audio_files_bucket: audio_files(bucket)\\n- idx_audio_files_hash: audio_files(sha256_hash)\\n- idx_audio_files_object_name: audio_files(object_name)\\n- idx_file_versions_audio_file: file_versions(audio_file_id)\\n- idx_file_versions_current: file_versions(is_current)\\n- idx_file_versions_hash: file_versions(sha256_hash)",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 5
+          },
+          {
+            "id": 4,
+            "title": "创建数据迁移脚本",
+            "description": "创建数据库迁移脚本，安全地更新现有数据库结构",
+            "details": "创建迁移脚本包含：\\n1. 检查表是否存在新字段\\n2. 添加新字段（如果不存在）\\n3. 创建新表（如果不存在）\\n4. 添加索引（如果不存在）\\n5. 数据迁移逻辑（如果需要）\\n6. 回滚脚本",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 5
+          },
+          {
+            "id": 5,
+            "title": "验证数据完整性",
+            "description": "创建验证脚本确保数据库迁移后的数据完整性",
+            "details": "创建验证脚本包含：\\n1. 检查所有新字段是否正确添加\\n2. 验证索引是否创建成功\\n3. 测试数据查询功能\\n4. 验证约束和外键关系\\n5. 性能测试基本查询",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 5
+          }
+        ]
       },
       {
         "id": 6,
@@ -624,7 +670,7 @@
       "created": "2025-01-27",
       "description": "语音识别服务优化第二版任务列表",
       "lastModified": "2025-01-27",
-      "updated": "2025-09-22T03:22:34.269Z"
+      "updated": "2025-09-22T03:41:04.920Z"
     }
   }
 }

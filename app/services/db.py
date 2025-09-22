@@ -320,26 +320,45 @@ class DatabaseService:
                               channels: int = None,
                               format: str = None,
                               speaker_id: int = None,
-                              metadata: Dict[str, Any] = None) -> Optional[int]:
-        """插入音频文件记录"""
+                              metadata: Dict[str, Any] = None,
+                              # MinIO相关字段
+                              bucket: str = None,
+                              object_name: str = None,
+                              sha256_hash: str = None,
+                              content_type: str = None,
+                              minio_version_id: str = None,
+                              storage_class: str = "STANDARD",
+                              file_tags: Dict[str, Any] = None,
+                              upload_time: datetime = None,
+                              is_duplicated: bool = False,
+                              original_filename: str = None) -> Optional[int]:
+        """插入音频文件记录（支持MinIO字段）"""
         if not self._initialized:
             await self.initialize()
         
         try:
             metadata = metadata or {}
+            file_tags = file_tags or {}
             
             async with self.pool.acquire() as conn:
                 result = await conn.fetchrow("""
                     INSERT INTO audio_files 
                     (filename, file_path, file_size, duration, sample_rate, 
-                     channels, format, speaker_id, metadata) 
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+                     channels, format, speaker_id, metadata,
+                     bucket, object_name, sha256_hash, content_type, 
+                     minio_version_id, storage_class, file_tags, 
+                     upload_time, is_duplicated, original_filename) 
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
+                            $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) 
                     RETURNING id
                 """, filename, file_path, file_size, duration, sample_rate, 
-                    channels, format, speaker_id, json.dumps(metadata))
+                    channels, format, speaker_id, json.dumps(metadata),
+                    bucket, object_name, sha256_hash, content_type,
+                    minio_version_id, storage_class, json.dumps(file_tags),
+                    upload_time, is_duplicated, original_filename)
                 
                 file_id = result['id']
-                logger.info(f"插入音频文件记录: {filename} (ID: {file_id})")
+                logger.info(f"插入音频文件记录: {filename} (ID: {file_id}) 到存储桶: {bucket}")
                 return file_id
                 
         except Exception as e:
@@ -465,6 +484,368 @@ class DatabaseService:
             logger.error(f"获取统计信息失败: {e}")
             return {}
     
+    # ==================== MinIO 和文件版本管理方法 ====================
+    
+    async def insert_file_version(self,
+                                 audio_file_id: int,
+                                 bucket: str,
+                                 object_name: str,
+                                 file_size: int = None,
+                                 sha256_hash: str = None,
+                                 minio_version_id: str = None,
+                                 is_current: bool = True,
+                                 metadata: Dict[str, Any] = None) -> Optional[int]:
+        """插入文件版本记录"""
+        if not self._initialized:
+            await self.initialize()
+        
+        try:
+            metadata = metadata or {}
+            
+            async with self.pool.acquire() as conn:
+                result = await conn.fetchrow("""
+                    INSERT INTO file_versions 
+                    (audio_file_id, bucket, object_name, file_size, 
+                     sha256_hash, minio_version_id, is_current, metadata) 
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
+                    RETURNING id, version_number
+                """, audio_file_id, bucket, object_name, file_size, 
+                    sha256_hash, minio_version_id, is_current, json.dumps(metadata))
+                
+                version_id = result['id']
+                version_number = result['version_number']
+                logger.info(f"插入文件版本记录: 文件ID {audio_file_id}, 版本 {version_number} (ID: {version_id})")
+                return version_id
+                
+        except Exception as e:
+            logger.error(f"插入文件版本失败: {e}")
+            return None
+    
+    async def get_audio_file_by_hash(self, sha256_hash: str) -> Optional[Dict[str, Any]]:
+        """根据哈希值查找音频文件（用于去重）"""
+        if not self._initialized:
+            await self.initialize()
+        
+        try:
+            async with self.pool.acquire() as conn:
+                result = await conn.fetchrow("""
+                    SELECT id, filename, bucket, object_name, sha256_hash, 
+                           content_type, file_size, upload_time, is_duplicated, 
+                           original_filename, metadata
+                    FROM audio_files 
+                    WHERE sha256_hash = $1
+                    LIMIT 1
+                """, sha256_hash)
+                
+                if result:
+                    return {
+                        'id': result['id'],
+                        'filename': result['filename'],
+                        'bucket': result['bucket'],
+                        'object_name': result['object_name'],
+                        'sha256_hash': result['sha256_hash'],
+                        'content_type': result['content_type'],
+                        'file_size': result['file_size'],
+                        'upload_time': result['upload_time'],
+                        'is_duplicated': result['is_duplicated'],
+                        'original_filename': result['original_filename'],
+                        'metadata': result['metadata']
+                    }
+                
+                return None
+                
+        except Exception as e:
+            logger.error(f"根据哈希查找文件失败: {e}")
+            return None
+    
+    async def get_audio_file_by_object_name(self, bucket: str, object_name: str) -> Optional[Dict[str, Any]]:
+        """根据存储桶和对象名查找音频文件"""
+        if not self._initialized:
+            await self.initialize()
+        
+        try:
+            async with self.pool.acquire() as conn:
+                result = await conn.fetchrow("""
+                    SELECT id, filename, bucket, object_name, sha256_hash, 
+                           content_type, file_size, upload_time, is_duplicated, 
+                           original_filename, metadata, created_at
+                    FROM audio_files 
+                    WHERE bucket = $1 AND object_name = $2
+                    LIMIT 1
+                """, bucket, object_name)
+                
+                if result:
+                    return {
+                        'id': result['id'],
+                        'filename': result['filename'],
+                        'bucket': result['bucket'],
+                        'object_name': result['object_name'],
+                        'sha256_hash': result['sha256_hash'],
+                        'content_type': result['content_type'],
+                        'file_size': result['file_size'],
+                        'upload_time': result['upload_time'],
+                        'is_duplicated': result['is_duplicated'],
+                        'original_filename': result['original_filename'],
+                        'metadata': result['metadata'],
+                        'created_at': result['created_at']
+                    }
+                
+                return None
+                
+        except Exception as e:
+            logger.error(f"根据对象名查找文件失败: {e}")
+            return None
+    
+    async def get_file_versions(self, audio_file_id: int) -> List[Dict[str, Any]]:
+        """获取文件的所有版本"""
+        if not self._initialized:
+            await self.initialize()
+        
+        try:
+            async with self.pool.acquire() as conn:
+                results = await conn.fetch("""
+                    SELECT id, version_number, bucket, object_name, file_size,
+                           sha256_hash, minio_version_id, is_current, 
+                           created_at, metadata
+                    FROM file_versions 
+                    WHERE audio_file_id = $1
+                    ORDER BY version_number DESC
+                """, audio_file_id)
+                
+                versions = []
+                for row in results:
+                    versions.append({
+                        'id': row['id'],
+                        'version_number': row['version_number'],
+                        'bucket': row['bucket'],
+                        'object_name': row['object_name'],
+                        'file_size': row['file_size'],
+                        'sha256_hash': row['sha256_hash'],
+                        'minio_version_id': row['minio_version_id'],
+                        'is_current': row['is_current'],
+                        'created_at': row['created_at'],
+                        'metadata': row['metadata']
+                    })
+                
+                return versions
+                
+        except Exception as e:
+            logger.error(f"获取文件版本失败: {e}")
+            return []
+    
+    async def get_current_file_version(self, audio_file_id: int) -> Optional[Dict[str, Any]]:
+        """获取文件的当前版本"""
+        if not self._initialized:
+            await self.initialize()
+        
+        try:
+            async with self.pool.acquire() as conn:
+                result = await conn.fetchrow("""
+                    SELECT id, version_number, bucket, object_name, file_size,
+                           sha256_hash, minio_version_id, is_current, 
+                           created_at, metadata
+                    FROM file_versions 
+                    WHERE audio_file_id = $1 AND is_current = true
+                    LIMIT 1
+                """, audio_file_id)
+                
+                if result:
+                    return {
+                        'id': result['id'],
+                        'version_number': result['version_number'],
+                        'bucket': result['bucket'],
+                        'object_name': result['object_name'],
+                        'file_size': result['file_size'],
+                        'sha256_hash': result['sha256_hash'],
+                        'minio_version_id': result['minio_version_id'],
+                        'is_current': result['is_current'],
+                        'created_at': result['created_at'],
+                        'metadata': result['metadata']
+                    }
+                
+                return None
+                
+        except Exception as e:
+            logger.error(f"获取当前文件版本失败: {e}")
+            return None
+    
+    async def update_audio_file_minio_info(self,
+                                          file_id: int,
+                                          bucket: str = None,
+                                          object_name: str = None,
+                                          sha256_hash: str = None,
+                                          content_type: str = None,
+                                          minio_version_id: str = None,
+                                          storage_class: str = None,
+                                          file_tags: Dict[str, Any] = None,
+                                          upload_time: datetime = None,
+                                          is_duplicated: bool = None) -> bool:
+        """更新音频文件的MinIO信息"""
+        if not self._initialized:
+            await self.initialize()
+        
+        try:
+            async with self.pool.acquire() as conn:
+                # 构建更新语句
+                updates = []
+                values = [file_id]
+                param_count = 2
+                
+                if bucket is not None:
+                    updates.append(f"bucket = ${param_count}")
+                    values.append(bucket)
+                    param_count += 1
+                
+                if object_name is not None:
+                    updates.append(f"object_name = ${param_count}")
+                    values.append(object_name)
+                    param_count += 1
+                
+                if sha256_hash is not None:
+                    updates.append(f"sha256_hash = ${param_count}")
+                    values.append(sha256_hash)
+                    param_count += 1
+                
+                if content_type is not None:
+                    updates.append(f"content_type = ${param_count}")
+                    values.append(content_type)
+                    param_count += 1
+                
+                if minio_version_id is not None:
+                    updates.append(f"minio_version_id = ${param_count}")
+                    values.append(minio_version_id)
+                    param_count += 1
+                
+                if storage_class is not None:
+                    updates.append(f"storage_class = ${param_count}")
+                    values.append(storage_class)
+                    param_count += 1
+                
+                if file_tags is not None:
+                    updates.append(f"file_tags = ${param_count}")
+                    values.append(json.dumps(file_tags))
+                    param_count += 1
+                
+                if upload_time is not None:
+                    updates.append(f"upload_time = ${param_count}")
+                    values.append(upload_time)
+                    param_count += 1
+                
+                if is_duplicated is not None:
+                    updates.append(f"is_duplicated = ${param_count}")
+                    values.append(is_duplicated)
+                    param_count += 1
+                
+                if not updates:
+                    logger.warning("没有提供要更新的字段")
+                    return False
+                
+                query = f"""
+                    UPDATE audio_files 
+                    SET {', '.join(updates)}
+                    WHERE id = $1
+                """
+                
+                result = await conn.execute(query, *values)
+                success = result == "UPDATE 1"
+                
+                if success:
+                    logger.info(f"更新音频文件MinIO信息: ID {file_id}")
+                else:
+                    logger.warning(f"音频文件 ID {file_id} 不存在或未更新")
+                
+                return success
+                
+        except Exception as e:
+            logger.error(f"更新音频文件MinIO信息失败: {e}")
+            return False
+    
+    async def get_storage_statistics(self) -> Dict[str, Any]:
+        """获取存储统计信息"""
+        if not self._initialized:
+            await self.initialize()
+        
+        try:
+            async with self.pool.acquire() as conn:
+                # 总文件统计
+                stats = await conn.fetchrow("""
+                    SELECT 
+                        COUNT(*) as total_files,
+                        SUM(file_size) as total_size,
+                        COUNT(CASE WHEN is_duplicated = true THEN 1 END) as duplicated_files,
+                        COUNT(CASE WHEN bucket IS NOT NULL THEN 1 END) as minio_files
+                    FROM audio_files
+                """)
+                
+                # 按存储桶统计
+                bucket_stats = await conn.fetch("""
+                    SELECT 
+                        bucket,
+                        COUNT(*) as file_count,
+                        SUM(file_size) as total_size,
+                        COUNT(CASE WHEN is_duplicated = true THEN 1 END) as duplicated_count
+                    FROM audio_files 
+                    WHERE bucket IS NOT NULL
+                    GROUP BY bucket
+                    ORDER BY file_count DESC
+                """)
+                
+                # 按内容类型统计
+                content_type_stats = await conn.fetch("""
+                    SELECT 
+                        content_type,
+                        COUNT(*) as file_count,
+                        SUM(file_size) as total_size
+                    FROM audio_files 
+                    WHERE content_type IS NOT NULL
+                    GROUP BY content_type
+                    ORDER BY file_count DESC
+                """)
+                
+                # 版本统计
+                version_stats = await conn.fetchrow("""
+                    SELECT 
+                        COUNT(*) as total_versions,
+                        COUNT(DISTINCT audio_file_id) as files_with_versions,
+                        COUNT(CASE WHEN is_current = true THEN 1 END) as current_versions
+                    FROM file_versions
+                """)
+                
+                return {
+                    'total_statistics': {
+                        'total_files': stats['total_files'],
+                        'total_size': stats['total_size'] or 0,
+                        'duplicated_files': stats['duplicated_files'],
+                        'minio_files': stats['minio_files']
+                    },
+                    'bucket_statistics': [
+                        {
+                            'bucket': row['bucket'],
+                            'file_count': row['file_count'],
+                            'total_size': row['total_size'] or 0,
+                            'duplicated_count': row['duplicated_count']
+                        }
+                        for row in bucket_stats
+                    ],
+                    'content_type_statistics': [
+                        {
+                            'content_type': row['content_type'],
+                            'file_count': row['file_count'],
+                            'total_size': row['total_size'] or 0
+                        }
+                        for row in content_type_stats
+                    ],
+                    'version_statistics': {
+                        'total_versions': version_stats['total_versions'] if version_stats else 0,
+                        'files_with_versions': version_stats['files_with_versions'] if version_stats else 0,
+                        'current_versions': version_stats['current_versions'] if version_stats else 0
+                    }
+                }
+                
+        except Exception as e:
+            logger.error(f"获取存储统计失败: {e}")
+            return {}
+
     async def close(self):
         """关闭数据库连接"""
         if self.pool:

@@ -1,6 +1,6 @@
 # Task ID: 4
 # Title: StorageService 核心功能实现
-# Status: pending
+# Status: done
 # Dependencies: 1
 # Priority: high
 # Description: 实现 MinIO 存储服务的核心功能模块
@@ -18,25 +18,25 @@
 单元测试覆盖所有方法，集成测试验证与MinIO的连接稳定性
 
 # Subtasks:
-## 1. 实现音频文件上传功能 [pending]
+## 1. 实现音频文件上传功能 [done]
 ### Dependencies: None
 ### Description: 实现 upload_audio_file() 方法
 ### Details:
 实现文件上传核心逻辑：\n1. 文件格式验证和转换\n2. 文件大小限制检查\n3. 生成唯一文件名\n4. 上传到 MinIO 存储\n5. 更新数据库记录\n6. 返回文件 ID 和元数据
 
-## 2. 实现文件下载和访问功能 [pending]
+## 2. 实现文件下载和访问功能 [done]
 ### Dependencies: None
 ### Description: 实现 download_audio_file() 和 get_audio_file_url() 方法
 ### Details:
 实现文件访问功能：\n1. 根据文件 ID 获取存储路径\n2. 生成预签名访问 URL\n3. 实现流式文件下载\n4. 添加访问权限验证\n5. 实现下载统计记录
 
-## 3. 实现批量操作功能 [pending]
+## 3. 实现批量操作功能 [done]
 ### Dependencies: None
 ### Description: 实现 upload_batch_files() 和批量删除功能
 ### Details:
 实现批量文件操作：\n1. 并行批量文件上传\n2. 批量文件删除\n3. 批量操作进度跟踪\n4. 部分失败处理策略\n5. 批量操作结果汇总
 
-## 4. 实现存储统计和清理功能 [pending]
+## 4. 实现存储统计和清理功能 [done]
 ### Dependencies: None
 ### Description: 实现 get_storage_stats() 和 cleanup_temp_files() 方法
 ### Details:
