@@ -1,0 +1,17 @@
+# 核心依赖
+fastapi==0.104.1
+uvicorn==0.24.0
+pydantic==2.5.0
+python-multipart==0.0.6
+
+# 语音处理
+sherpa-onnx==1.9.14
+soundfile==0.12.1
+librosa==0.10.1
+numpy==1.24.3
+
+# 可选：音频格式支持
+# pydub
+
+# 可选：GPU加速
+# onnxruntime-gpu
