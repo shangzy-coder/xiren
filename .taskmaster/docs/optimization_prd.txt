@@ -1,0 +1,466 @@
+# 语音识别服务优化 PRD — 第二版
+
+## 1. 项目背景
+
+基于第一版语音识别服务的成功实施，现需要进行三个关键优化以提升系统性能、可靠性和可维护性：
+
+1. **MinIO 对象存储功能完善** - 补齐音频文件存储能力
+2. **VAD 模块重构统一** - 提高 VAD 功能的复用性和一致性  
+3. **批次处理架构优化** - 基于 demo 架构优化并行处理性能
+
+## 2. 优化目标
+
+### 2.1 性能提升
+- 批次处理性能提升 30-50%
+- 音频文件存储和检索效率优化
+- VAD 处理性能统一优化
+
+### 2.2 架构优化
+- 统一 VAD 处理入口，消除代码重复
+- 优化并行处理架构，提高资源利用率
+- 完善音频文件生命周期管理
+
+### 2.3 可维护性
+- VAD 模块标准化，便于维护和扩展
+- 存储服务模块化，便于后续功能扩展
+- 批次处理逻辑清晰化，便于调试和优化
+
+## 3. 优化方案设计
+
+### 3.1 MinIO 对象存储模块设计
+
+#### 3.1.1 存储服务架构
+```mermaid
+flowchart TD
+    API[API接口层] --> StorageService[存储服务层]
+    StorageService --> MinIOClient[MinIO客户端]
+    StorageService --> DatabaseService[数据库服务]
+    
+    subgraph MinIO存储桶
+        AudioBucket[audio-files桶]
+        TempBucket[temp-files桶]
+        BackupBucket[backup-files桶]
+    end
+    
+    MinIOClient --> AudioBucket
+    MinIOClient --> TempBucket
+    MinIOClient --> BackupBucket
+```
+
+#### 3.1.2 存储服务接口设计
+```python
+class StorageService:
+    # 音频文件管理
+    async def upload_audio_file(file_data, filename, metadata) -> str
+    async def download_audio_file(file_id) -> bytes
+    async def delete_audio_file(file_id) -> bool
+    async def get_audio_file_url(file_id, expire_time) -> str
+    
+    # 批量操作
+    async def upload_batch_files(files) -> List[str]
+    async def cleanup_temp_files(older_than_hours) -> int
+    
+    # 存储统计
+    async def get_storage_stats() -> Dict[str, Any]
+    async def get_file_metadata(file_id) -> Dict[str, Any]
+```
+
+#### 3.1.3 数据库表结构扩展
+```sql
+-- 扩展 audio_files 表
+ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS minio_object_name VARCHAR(500);
+ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS minio_bucket VARCHAR(100) DEFAULT 'audio-files';
+ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS file_hash VARCHAR(64);
+ALTER TABLE audio_files ADD COLUMN IF NOT EXISTS upload_status VARCHAR(20) DEFAULT 'uploaded';
+
+-- 创建文件版本表 (支持文件版本管理)
+CREATE TABLE IF NOT EXISTS file_versions (
+    id SERIAL PRIMARY KEY,
+    audio_file_id INTEGER REFERENCES audio_files(id),
+    version_number INTEGER NOT NULL,
+    minio_object_name VARCHAR(500) NOT NULL,
+    file_hash VARCHAR(64),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### 3.2 VAD 模块重构设计
+
+#### 3.2.1 统一 VAD 处理器架构
+```mermaid
+flowchart TD
+    AudioInput[音频输入] --> VADProcessor[VAD处理器]
+    
+    subgraph VADProcessor[VAD统一处理器]
+        ConfigManager[配置管理器]
+        ModelLoader[模型加载器]
+        SegmentDetector[段落检测器]
+        ResultProcessor[结果处理器]
+    end
+    
+    VADProcessor --> Segments[语音段落输出]
+    
+    subgraph 调用方
+        ModelManager[模型管理器]
+        PipelineOrchestrator[流水线编排器]
+        WebSocketHandler[WebSocket处理器]
+    end
+    
+    ModelManager --> VADProcessor
+    PipelineOrchestrator --> VADProcessor
+    WebSocketHandler --> VADProcessor
+```
+
+#### 3.2.2 VAD 处理器接口设计
+```python
+class VADProcessor:
+    def __init__(self, model_path: str, config: VADConfig):
+        """初始化VAD处理器"""
+    
+    async def detect_speech_segments(
+        self, 
+        audio_data: np.ndarray, 
+        sample_rate: int,
+        **kwargs
+    ) -> List[SpeechSegment]:
+        """检测语音段落 - 统一接口"""
+    
+    async def process_streaming_audio(
+        self,
+        audio_chunk: np.ndarray,
+        sample_rate: int
+    ) -> Optional[SpeechSegment]:
+        """流式音频VAD处理"""
+    
+    def configure(self, **params) -> None:
+        """动态配置VAD参数"""
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """获取VAD处理统计信息"""
+```
+
+#### 3.2.3 VAD 配置统一管理
+```python
+@dataclass
+class VADConfig:
+    model_path: str = settings.VAD_MODEL_PATH
+    threshold: float = 0.5
+    min_silence_duration: float = 0.25  # 秒
+    min_speech_duration: float = 0.25   # 秒
+    max_speech_duration: float = 5.0    # 秒
+    window_size: int = 512
+    buffer_size_seconds: float = 30.0
+    provider: str = "cpu"
+    num_threads: int = 2
+    
+    # 流式处理配置
+    streaming_mode: bool = False
+    overlap_duration: float = 0.1  # 秒
+    
+    @classmethod
+    def from_environment(cls) -> 'VADConfig':
+        """从环境变量创建配置"""
+```
+
+### 3.3 批次处理架构优化
+
+#### 3.3.1 优化后的处理流程
+```mermaid
+flowchart TD
+    AudioInput[音频输入444个段落] --> BatchDivision[批次划分]
+    
+    subgraph 第一阶段[批次级ASR并行处理]
+        Batch1[批次1:100段落] --> ASR1[ASR线程池1]
+        Batch2[批次2:100段落] --> ASR2[ASR线程池2] 
+        Batch3[批次3:100段落] --> ASR3[ASR线程池3]
+        Batch4[批次4:144段落] --> ASR4[ASR线程池4]
+    end
+    
+    ASR1 --> ASRResults[ASR结果收集]
+    ASR2 --> ASRResults
+    ASR3 --> ASRResults
+    ASR4 --> ASRResults
+    
+    subgraph 第二阶段[后处理并行]
+        ASRResults --> PostProcessor[后处理调度器]
+        PostProcessor --> PunctuationPool[标点处理线程池]
+        PostProcessor --> SpeakerPool[声纹识别线程池]
+    end
+    
+    PunctuationPool --> FinalResults[最终结果合并]
+    SpeakerPool --> FinalResults
+```
+
+#### 3.3.2 优化后的批次处理接口
+```python
+class OptimizedBatchProcessor:
+    def __init__(self):
+        # 第一阶段：ASR批次处理
+        self.asr_batch_size = settings.MAX_BATCH_SIZE
+        self.asr_workers = settings.MAX_BATCH_THREADS
+        
+        # 第二阶段：后处理并行
+        self.punctuation_workers = settings.PUNCTUATION_THREADS_PER_BATCH
+        self.speaker_workers = settings.SPEAKER_THREADS_PER_BATCH
+    
+    async def process_segments_optimized(
+        self,
+        segments: List[Dict[str, Any]],
+        enable_punctuation: bool = True,
+        enable_speaker_id: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        优化的段落处理流程
+        
+        阶段1：批次级ASR并行
+        阶段2：后处理并行 (标点 + 声纹)
+        """
+        
+        # 阶段1：ASR批次并行处理
+        asr_results = await self._parallel_asr_processing(segments)
+        
+        # 阶段2：后处理并行
+        final_results = await self._parallel_post_processing(
+            asr_results, segments, enable_punctuation, enable_speaker_id
+        )
+        
+        return final_results
+```
+
+#### 3.3.3 后处理并行实现
+```python
+async def _parallel_post_processing(
+    self,
+    asr_results: List[Dict],
+    segments: List[Dict],
+    enable_punctuation: bool,
+    enable_speaker_id: bool
+) -> List[Dict]:
+    """并行执行标点处理和声纹识别"""
+    
+    # 准备并行任务
+    punctuation_tasks = []
+    speaker_tasks = []
+    
+    # 创建线程池
+    with ThreadPoolExecutor(max_workers=self.punctuation_workers + self.speaker_workers) as executor:
+        
+        # 提交标点处理任务
+        if enable_punctuation and self.punctuation_processor:
+            for i, result in enumerate(asr_results):
+                if result['text'].strip():
+                    task = executor.submit(
+                        self._process_punctuation_single,
+                        result['text'], i
+                    )
+                    punctuation_tasks.append(task)
+        
+        # 提交声纹识别任务  
+        if enable_speaker_id and self.speaker_extractor:
+            for i, segment in enumerate(segments):
+                task = executor.submit(
+                    self._process_speaker_single,
+                    segment['samples'], segment['sample_rate'], i
+                )
+                speaker_tasks.append(task)
+        
+        # 收集并行结果
+        punctuation_results = {}
+        speaker_results = {}
+        
+        # 等待标点处理完成
+        for task in as_completed(punctuation_tasks):
+            text, index = task.result()
+            punctuation_results[index] = text
+        
+        # 等待声纹识别完成  
+        for task in as_completed(speaker_tasks):
+            speaker_info, index = task.result()
+            speaker_results[index] = speaker_info
+    
+    # 合并结果
+    final_results = []
+    for i, asr_result in enumerate(asr_results):
+        final_result = asr_result.copy()
+        
+        # 添加标点结果
+        if i in punctuation_results:
+            final_result['text_with_punct'] = punctuation_results[i]
+            final_result['text'] = punctuation_results[i]
+        
+        # 添加声纹结果
+        if i in speaker_results:
+            final_result['speaker'] = speaker_results[i]
+        
+        final_results.append(final_result)
+    
+    return final_results
+```
+
+## 4. 配置参数扩展
+
+### 4.1 MinIO 存储配置
+```python
+# app/config.py 新增配置项
+class Settings:
+    # MinIO 对象存储配置
+    MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "localhost:9000")
+    MINIO_ACCESS_KEY: str = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+    MINIO_SECRET_KEY: str = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+    MINIO_BUCKET: str = os.getenv("MINIO_BUCKET", "audio-files")
+    MINIO_TEMP_BUCKET: str = os.getenv("MINIO_TEMP_BUCKET", "temp-files")
+    MINIO_BACKUP_BUCKET: str = os.getenv("MINIO_BACKUP_BUCKET", "backup-files")
+    
+    # 文件存储配置
+    MAX_FILE_SIZE: int = int(os.getenv("MAX_FILE_SIZE", "100")) * 1024 * 1024  # 100MB
+    TEMP_FILE_CLEANUP_HOURS: int = int(os.getenv("TEMP_FILE_CLEANUP_HOURS", "24"))
+    ENABLE_FILE_VERSIONING: bool = os.getenv("ENABLE_FILE_VERSIONING", "false").lower() == "true"
+    ENABLE_FILE_DEDUPLICATION: bool = os.getenv("ENABLE_FILE_DEDUPLICATION", "true").lower() == "true"
+```
+
+### 4.2 VAD 统一配置
+```python
+    # VAD 模块配置
+    VAD_MODEL_PATH: str = os.getenv("VAD_MODEL_PATH", "./models/vad/silero_vad.onnx")
+    VAD_THRESHOLD: float = float(os.getenv("VAD_THRESHOLD", "0.5"))
+    VAD_MIN_SILENCE_DURATION: float = float(os.getenv("VAD_MIN_SILENCE_DURATION", "0.25"))
+    VAD_MIN_SPEECH_DURATION: float = float(os.getenv("VAD_MIN_SPEECH_DURATION", "0.25"))
+    VAD_MAX_SPEECH_DURATION: float = float(os.getenv("VAD_MAX_SPEECH_DURATION", "5.0"))
+    VAD_BUFFER_SIZE_SECONDS: float = float(os.getenv("VAD_BUFFER_SIZE_SECONDS", "30.0"))
+    VAD_PROVIDER: str = os.getenv("VAD_PROVIDER", "cpu")
+    VAD_THREADS: int = int(os.getenv("VAD_THREADS", "2"))
+```
+
+### 4.3 优化后的批次处理配置
+```python
+    # 批次处理优化配置
+    ENABLE_OPTIMIZED_BATCH_PROCESSING: bool = os.getenv("ENABLE_OPTIMIZED_BATCH_PROCESSING", "true").lower() == "true"
+    
+    # 阶段1：ASR批次配置 (保持不变)
+    MAX_BATCH_THREADS: int = int(os.getenv("MAX_BATCH_THREADS", "4"))
+    MIN_BATCH_SIZE: int = int(os.getenv("MIN_BATCH_SIZE", "20"))
+    MAX_BATCH_SIZE: int = int(os.getenv("MAX_BATCH_SIZE", "100"))
+    ASR_THREADS_PER_BATCH: int = int(os.getenv("ASR_THREADS_PER_BATCH", "2"))
+    
+    # 阶段2：后处理并行配置
+    PUNCTUATION_THREADS_PER_BATCH: int = int(os.getenv("PUNCTUATION_THREADS_PER_BATCH", "2"))
+    SPEAKER_THREADS_PER_BATCH: int = int(os.getenv("SPEAKER_THREADS_PER_BATCH", "2"))
+    ENABLE_PARALLEL_POST_PROCESSING: bool = os.getenv("ENABLE_PARALLEL_POST_PROCESSING", "true").lower() == "true"
+    
+    # 性能调优配置
+    POST_PROCESSING_BATCH_SIZE: int = int(os.getenv("POST_PROCESSING_BATCH_SIZE", "50"))
+    POST_PROCESSING_TIMEOUT: int = int(os.getenv("POST_PROCESSING_TIMEOUT", "60"))
+```
+
+## 5. 实施计划
+
+### 5.1 第一阶段：MinIO 存储实现 (1-2天)
+1. **实现 StorageService 类**
+   - 基础 MinIO 客户端封装
+   - 音频文件上传/下载/删除功能
+   - 文件元数据管理
+
+2. **数据库表扩展**
+   - 扩展 audio_files 表字段
+   - 创建 file_versions 表
+   - 更新相关索引
+
+3. **API 接口集成**
+   - 更新音频上传接口使用 MinIO
+   - 添加文件管理相关 API
+
+### 5.2 第二阶段：VAD 模块重构 (1-2天)
+1. **创建统一 VADProcessor 类**
+   - 从现有代码提取 VAD 逻辑
+   - 实现配置化的 VAD 处理器
+   - 支持批处理和流式处理
+
+2. **重构现有调用点**
+   - 更新 model.py 中的 VAD 调用
+   - 更新 WebSocket 处理中的 VAD 调用
+   - 更新流水线中的 VAD 调用
+
+3. **性能测试和优化**
+   - VAD 处理性能基准测试
+   - 内存使用优化
+
+### 5.3 第三阶段：批次处理优化 (2-3天)
+1. **实现优化的批次处理器**
+   - 重构 _parallel_recognize_segments 方法
+   - 实现后处理并行逻辑
+   - 添加性能监控指标
+
+2. **集成和测试**
+   - 单元测试覆盖
+   - 性能对比测试
+   - 并发压力测试
+
+3. **配置和部署**
+   - 添加功能开关配置
+   - 更新部署配置
+   - 文档更新
+
+## 6. 验收标准
+
+### 6.1 MinIO 存储模块
+- ✅ 支持音频文件的完整生命周期管理
+- ✅ 文件上传/下载成功率 > 99.9%
+- ✅ 支持文件去重和版本管理
+- ✅ 提供完整的文件管理 API
+
+### 6.2 VAD 模块重构
+- ✅ 所有 VAD 调用统一使用 VADProcessor
+- ✅ VAD 处理性能与原实现一致或更优
+- ✅ 支持配置化的 VAD 参数调整
+- ✅ 内存使用优化，避免内存泄漏
+
+### 6.3 批次处理优化
+- ✅ 批次处理性能提升 30-50%
+- ✅ 并行处理正确性验证 (结果一致性)
+- ✅ 资源利用率提升 (CPU/内存)
+- ✅ 支持动态配置并行参数
+
+### 6.4 系统集成
+- ✅ 向后兼容性保证
+- ✅ 现有 API 接口无破坏性变更
+- ✅ 配置升级平滑迁移
+- ✅ 完整的监控指标覆盖
+
+## 7. 风险评估
+
+### 7.1 技术风险
+- **MinIO 连接稳定性**: 实现重试机制和降级策略
+- **VAD 重构兼容性**: 充分的回归测试覆盖
+- **并行处理复杂性**: 详细的单元测试和集成测试
+
+### 7.2 性能风险
+- **内存使用增加**: 实现内存监控和限制机制
+- **并发处理瓶颈**: 性能测试和容量规划
+- **文件存储延迟**: MinIO 性能调优和监控
+
+### 7.3 缓解措施
+- 实现功能开关，支持快速回滚
+- 分阶段发布，逐步验证功能稳定性
+- 完善监控告警，及时发现问题
+- 详细的性能基准测试和对比
+
+## 8. 后续规划
+
+### 8.1 短期优化 (1个月内)
+- 存储服务的分布式扩展
+- VAD 模型的热更新支持
+- 批次处理的自适应调优
+
+### 8.2 中期规划 (3个月内)
+- 音频文件的智能压缩和优化
+- VAD 精度的持续优化
+- 更多并行处理模式支持
+
+### 8.3 长期愿景 (6个月内)
+- 多云存储支持 (OSS、S3等)
+- AI 驱动的 VAD 参数自适应
+- 分布式批次处理支持
+
+---
+
+**本 PRD 基于现有系统架构，提供三个关键优化的详细实施方案。所有优化都考虑了向后兼容性和平滑升级路径，确保系统稳定运行的同时获得显著的性能提升。**

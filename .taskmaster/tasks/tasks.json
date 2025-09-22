@@ -3,131 +3,628 @@
     "tasks": [
       {
         "id": 1,
-        "title": "搭建项目基础架构",
-        "description": "创建 FastAPI 项目结构、依赖管理、Docker 配置",
-        "status": "done",
+        "title": "MinIO 对象存储模块设计与实现",
+        "description": "实现完整的 MinIO 对象存储功能，提供音频文件生命周期管理",
+        "status": "pending",
         "priority": "high",
         "dependencies": [],
-        "details": "使用 Poetry 管理依赖，创建 src/ 目录结构，配置 Docker 容器化，设置基本的 FastAPI 应用",
-        "testStrategy": "验证项目能成功启动，API 端点可访问"
+        "details": "根据 PRD 第3.1节要求实现：\n1. 设计并实现 StorageService 类\n2. 扩展数据库表结构支持 MinIO 元数据\n3. 实现文件上传、下载、删除功能\n4. 支持文件版本管理和去重\n5. 实现批量操作和清理功能\n6. 集成到现有 API 接口",
+        "testStrategy": "通过单元测试验证各项存储功能，集成测试验证与数据库的交互，性能测试验证文件操作效率",
+        "subtasks": []
       },
       {
         "id": 2,
-        "title": "集成 Sherpa-ONNX 语音识别",
-        "description": "封装 Sherpa-ONNX 模型加载和推理功能",
-        "status": "done",
+        "title": "VAD 模块重构统一",
+        "description": "重构现有 VAD 处理逻辑，实现统一的 VAD 处理器",
+        "status": "pending",
+        "priority": "high",
+        "dependencies": [],
+        "details": "根据 PRD 第3.2节要求实现：\n1. 创建统一的 VADProcessor 类\n2. 实现配置化的 VAD 参数管理\n3. 支持批处理和流式处理模式\n4. 重构现有代码中的所有 VAD 调用点\n5. 优化内存使用和性能",
+        "testStrategy": "性能基准测试对比重构前后的处理效率，功能测试验证各种音频格式的兼容性",
+        "subtasks": []
+      },
+      {
+        "id": 3,
+        "title": "批次处理架构优化",
+        "description": "优化现有批次处理流程，实现二阶段并行处理",
+        "status": "pending",
+        "priority": "high",
+        "dependencies": [],
+        "details": "根据 PRD 第3.3节要求实现：\n1. 重构 OptimizedBatchProcessor 类\n2. 实现阶段1：ASR批次并行处理\n3. 实现阶段2：后处理并行（标点+声纹）\n4. 添加性能监控指标\n5. 支持动态配置并行参数",
+        "testStrategy": "性能压力测试验证30-50%的性能提升目标，并发测试验证结果一致性",
+        "subtasks": []
+      },
+      {
+        "id": 4,
+        "title": "StorageService 核心功能实现",
+        "description": "实现 MinIO 存储服务的核心功能模块",
+        "status": "pending",
         "priority": "high",
         "dependencies": [
           1
         ],
-        "details": "在 core/model.py 中实现 load_model() 和 infer() 方法，支持实时语音转文字",
-        "testStrategy": "测试音频文件输入，验证识别准确率"
+        "details": "实现 StorageService 类的核心方法：\n1. upload_audio_file() - 音频文件上传\n2. download_audio_file() - 文件下载\n3. delete_audio_file() - 文件删除\n4. get_audio_file_url() - 获取文件访问URL\n5. upload_batch_files() - 批量文件上传\n6. cleanup_temp_files() - 临时文件清理\n7. get_storage_stats() - 存储统计信息",
+        "testStrategy": "单元测试覆盖所有方法，集成测试验证与MinIO的连接稳定性",
+        "subtasks": []
       },
       {
-        "id": 3,
-        "title": "实现声纹识别功能",
-        "description": "集成声纹识别模型，实现说话人识别",
-        "status": "done",
+        "id": 5,
+        "title": "数据库表结构扩展",
+        "description": "扩展数据库表以支持 MinIO 对象存储元数据",
+        "status": "pending",
+        "priority": "medium",
+        "dependencies": [
+          1
+        ],
+        "details": "根据 PRD 第3.1.3节执行数据库迁移：\n1. 扩展 audio_files 表添加 MinIO 相关字段\n2. 创建 file_versions 表支持版本管理\n3. 添加必要的索引优化查询性能\n4. 创建数据迁移脚本\n5. 验证数据完整性",
+        "testStrategy": "数据库迁移测试，数据完整性验证，查询性能测试",
+        "subtasks": []
+      },
+      {
+        "id": 6,
+        "title": "VADProcessor 统一接口实现",
+        "description": "实现统一的 VAD 处理器接口和配置管理",
+        "status": "pending",
         "priority": "high",
         "dependencies": [
           2
         ],
-        "details": "使用 pyannote-audio，实现声纹提取和匹配，支持多说话人场景",
-        "testStrategy": "测试不同说话人的音频，验证识别准确性"
+        "details": "根据 PRD 第3.2.2节实现：\n1. VADProcessor 类核心接口\n2. detect_speech_segments() 统一检测方法\n3. process_streaming_audio() 流式处理\n4. configure() 动态配置接口\n5. get_stats() 统计信息接口\n6. VADConfig 配置类实现",
+        "testStrategy": "功能测试验证各接口正确性，性能测试对比原实现",
+        "subtasks": []
       },
       {
-        "id": 4,
-        "title": "设计 RESTful API 接口",
-        "description": "设计语音识别和声纹识别的 API 端点",
-        "status": "done",
+        "id": 7,
+        "title": "现有代码 VAD 调用重构",
+        "description": "重构项目中所有使用 VAD 的代码点，统一使用新的 VADProcessor",
+        "status": "pending",
         "priority": "medium",
+        "dependencies": [
+          6
+        ],
+        "details": "重构以下模块中的 VAD 调用：\n1. app/core/model.py 中的模型管理器\n2. app/core/pipeline.py 中的流水线编排器  \n3. app/core/websocket_manager.py 中的 WebSocket 处理\n4. 确保所有调用点使用统一接口\n5. 移除重复的 VAD 初始化代码",
+        "testStrategy": "回归测试确保重构后功能正常，集成测试验证各模块协作",
+        "subtasks": []
+      },
+      {
+        "id": 8,
+        "title": "优化批次处理器实现",
+        "description": "实现新的 OptimizedBatchProcessor 类，支持二阶段并行处理",
+        "status": "pending",
+        "priority": "high",
         "dependencies": [
           3
         ],
-        "details": "实现 /transcribe 和 /speaker-recognition 端点，支持文件上传和实时流",
-        "testStrategy": "使用 Postman 测试所有 API 端点"
+        "details": "根据 PRD 第3.3.2节实现：\n1. process_segments_optimized() 主处理方法\n2. _parallel_asr_processing() 阶段1 ASR并行\n3. _parallel_post_processing() 阶段2 后处理并行\n4. 线程池管理和资源控制\n5. 错误处理和降级机制",
+        "testStrategy": "性能基准测试，并发压力测试，错误场景测试",
+        "subtasks": []
+      },
+      {
+        "id": 9,
+        "title": "后处理并行机制实现",
+        "description": "实现标点处理和声纹识别的并行执行机制",
+        "status": "pending",
+        "priority": "medium",
+        "dependencies": [
+          8
+        ],
+        "details": "根据 PRD 第3.3.3节实现：\n1. 并行任务调度器\n2. 标点处理线程池\n3. 声纹识别线程池\n4. 结果收集和合并逻辑\n5. 超时和异常处理机制",
+        "testStrategy": "并行处理正确性验证，性能提升验证，异常处理测试",
+        "subtasks": []
+      },
+      {
+        "id": 10,
+        "title": "配置参数扩展和管理",
+        "description": "扩展系统配置支持所有新增功能的参数管理",
+        "status": "pending",
+        "priority": "medium",
+        "dependencies": [],
+        "details": "根据 PRD 第4节扩展 app/config.py：\n1. MinIO 存储配置参数\n2. VAD 统一配置参数\n3. 批次处理优化配置\n4. 环境变量映射\n5. 配置验证和默认值设置",
+        "testStrategy": "配置加载测试，参数验证测试，环境变量覆盖测试",
+        "subtasks": []
+      },
+      {
+        "id": 11,
+        "title": "API 接口集成更新",
+        "description": "更新现有 API 接口以支持新的存储和处理功能",
+        "status": "pending",
+        "priority": "medium",
+        "dependencies": [
+          4,
+          5
+        ],
+        "details": "更新以下 API 模块：\n1. app/api/asr.py - 集成新的存储服务\n2. app/api/pipeline.py - 使用优化的批次处理\n3. app/api/comprehensive.py - 更新完整处理流程\n4. 添加文件管理相关的新 API 端点\n5. 更新 API 文档和示例",
+        "testStrategy": "API 功能测试，接口兼容性测试，性能对比测试",
+        "subtasks": []
+      },
+      {
+        "id": 12,
+        "title": "系统集成测试和性能验证",
+        "description": "进行完整的系统集成测试和性能验证",
+        "status": "pending",
+        "priority": "high",
+        "dependencies": [
+          9,
+          10,
+          11
+        ],
+        "details": "执行完整的验证流程：\n1. 单元测试覆盖率验证\n2. 集成测试验证各模块协作\n3. 性能基准测试和对比\n4. 并发压力测试\n5. 内存使用和资源监控\n6. 向后兼容性验证",
+        "testStrategy": "自动化测试套件执行，性能报告生成，兼容性验证报告",
+        "subtasks": []
+      },
+      {
+        "id": 13,
+        "title": "部署配置和文档更新",
+        "description": "更新部署配置和相关文档",
+        "status": "pending",
+        "priority": "low",
+        "dependencies": [
+          12
+        ],
+        "details": "完成项目交付准备：\n1. 更新 Docker 配置文件\n2. 更新 docker-compose 配置\n3. 更新部署脚本和环境变量\n4. 更新 API 文档\n5. 编写优化功能使用指南\n6. 更新 README 和 CHANGELOG",
+        "testStrategy": "部署验证测试，文档准确性检查",
+        "subtasks": []
+      }
+    ],
+    "metadata": {
+      "version": "1.0",
+      "created": "2025-01-27",
+      "description": "语音识别服务优化第二版任务列表",
+      "lastModified": "2025-01-27"
+    }
+  },
+  "optimization-v2": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "MinIO 对象存储模块设计与实现",
+        "description": "实现完整的 MinIO 对象存储功能，提供音频文件生命周期管理",
+        "status": "done",
+        "priority": "high",
+        "dependencies": [],
+        "details": "根据 PRD 第3.1节要求实现：\n1. 设计并实现 StorageService 类\n2. 扩展数据库表结构支持 MinIO 元数据\n3. 实现文件上传、下载、删除功能\n4. 支持文件版本管理和去重\n5. 实现批量操作和清理功能\n6. 集成到现有 API 接口",
+        "testStrategy": "通过单元测试验证各项存储功能，集成测试验证与数据库的交互，性能测试验证文件操作效率",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "设计 StorageService 类架构",
+            "description": "设计 MinIO 存储服务的整体架构和接口",
+            "details": "根据 PRD 3.1.2 节设计：\\n1. 定义 StorageService 类接口\\n2. 设计音频文件管理方法\\n3. 设计批量操作接口\\n4. 设计存储统计接口\\n5. 定义错误处理策略",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 1
+          },
+          {
+            "id": 2,
+            "title": "实现 MinIO 客户端封装",
+            "description": "创建 MinIO 客户端的基础封装类",
+            "details": "实现 MinIO 连接和基础操作：\\n1. 创建 MinIOClient 封装类\\n2. 实现连接池管理\\n3. 实现错误重试机制\\n4. 添加连接健康检查\\n5. 配置桶创建和管理",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 1
+          },
+          {
+            "id": 3,
+            "title": "设计存储桶结构",
+            "description": "设计和创建不同用途的存储桶",
+            "details": "根据 PRD 架构图设计：\\n1. audio-files 桶 - 正式音频文件\\n2. temp-files 桶 - 临时文件\\n3. backup-files 桶 - 备份文件\\n4. 定义桶策略和权限\\n5. 实现自动桶创建逻辑",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 1
+          },
+          {
+            "id": 4,
+            "title": "实现文件哈希和去重机制",
+            "description": "实现文件去重和完整性验证功能",
+            "details": "实现文件去重逻辑：\\n1. 实现文件 SHA256 哈希计算\\n2. 实现重复文件检测\\n3. 实现文件完整性验证\\n4. 设计去重存储策略\\n5. 添加哈希索引优化",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 1
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "VAD 模块重构统一",
+        "description": "重构现有 VAD 处理逻辑，实现统一的 VAD 处理器",
+        "status": "pending",
+        "priority": "high",
+        "dependencies": [],
+        "details": "根据 PRD 第3.2节要求实现：\n1. 创建统一的 VADProcessor 类\n2. 实现配置化的 VAD 参数管理\n3. 支持批处理和流式处理模式\n4. 重构现有代码中的所有 VAD 调用点\n5. 优化内存使用和性能",
+        "testStrategy": "性能基准测试对比重构前后的处理效率，功能测试验证各种音频格式的兼容性",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "创建 VADConfig 配置类",
+            "description": "实现 VAD 统一配置管理",
+            "details": "根据 PRD 3.2.3 实现：\\n1. 定义 VADConfig 数据类\\n2. 实现环境变量读取\\n3. 添加配置验证逻辑\\n4. 实现配置热更新\\n5. 添加配置文档",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 2
+          },
+          {
+            "id": 2,
+            "title": "设计 VADProcessor 基础架构",
+            "description": "设计统一的 VAD 处理器架构",
+            "details": "设计核心组件：\\n1. ConfigManager - 配置管理器\\n2. ModelLoader - 模型加载器\\n3. SegmentDetector - 段落检测器\\n4. ResultProcessor - 结果处理器\\n5. 定义组件间接口",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 2
+          },
+          {
+            "id": 3,
+            "title": "提取现有 VAD 逻辑",
+            "description": "从现有代码中提取和分析 VAD 逻辑",
+            "details": "分析现有 VAD 实现：\\n1. 分析 app/core/vad.py 现有逻辑\\n2. 分析 model.py 中的 VAD 调用\\n3. 分析 websocket_manager.py 中的使用\\n4. 识别重复代码和差异\\n5. 设计迁移策略",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 2
+          },
+          {
+            "id": 4,
+            "title": "实现内存优化和性能监控",
+            "description": "优化 VAD 处理的内存使用和性能",
+            "details": "实现性能优化：\\n1. 实现音频缓冲区复用\\n2. 优化模型加载和卸载\\n3. 添加内存使用监控\\n4. 实现处理时间统计\\n5. 添加性能告警机制",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 2
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "批次处理架构优化",
+        "description": "优化现有批次处理流程，实现二阶段并行处理",
+        "status": "pending",
+        "priority": "high",
+        "dependencies": [],
+        "details": "根据 PRD 第3.3节要求实现：\n1. 重构 OptimizedBatchProcessor 类\n2. 实现阶段1：ASR批次并行处理\n3. 实现阶段2：后处理并行（标点+声纹）\n4. 添加性能监控指标\n5. 支持动态配置并行参数",
+        "testStrategy": "性能压力测试验证30-50%的性能提升目标，并发测试验证结果一致性",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "设计二阶段处理架构",
+            "description": "设计优化后的批次处理流程架构",
+            "details": "设计处理架构：\\n1. 设计阶段1：ASR批次并行架构\\n2. 设计阶段2：后处理并行架构\\n3. 定义阶段间数据传递格式\\n4. 设计资源调度策略\\n5. 定义性能监控指标",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 3
+          },
+          {
+            "id": 2,
+            "title": "分析现有批次处理逻辑",
+            "description": "分析现有的 _parallel_recognize_segments 方法",
+            "details": "分析现有实现：\\n1. 分析当前批次处理性能瓶颈\\n2. 识别并行处理的限制因素\\n3. 分析资源利用率\\n4. 评估优化潜力\\n5. 设计迁移方案",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 3
+          },
+          {
+            "id": 3,
+            "title": "设计批次划分策略",
+            "description": "设计智能的批次划分和调度策略",
+            "details": "设计划分策略：\\n1. 基于音频长度的智能分组\\n2. 考虑内存限制的批次大小\\n3. 负载均衡的任务分配\\n4. 动态批次大小调整\\n5. 优先级队列管理",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 3
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "StorageService 核心功能实现",
+        "description": "实现 MinIO 存储服务的核心功能模块",
+        "status": "pending",
+        "priority": "high",
+        "dependencies": [
+          1
+        ],
+        "details": "实现 StorageService 类的核心方法：\n1. upload_audio_file() - 音频文件上传\n2. download_audio_file() - 文件下载\n3. delete_audio_file() - 文件删除\n4. get_audio_file_url() - 获取文件访问URL\n5. upload_batch_files() - 批量文件上传\n6. cleanup_temp_files() - 临时文件清理\n7. get_storage_stats() - 存储统计信息",
+        "testStrategy": "单元测试覆盖所有方法，集成测试验证与MinIO的连接稳定性",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "实现音频文件上传功能",
+            "description": "实现 upload_audio_file() 方法",
+            "details": "实现文件上传核心逻辑：\\n1. 文件格式验证和转换\\n2. 文件大小限制检查\\n3. 生成唯一文件名\\n4. 上传到 MinIO 存储\\n5. 更新数据库记录\\n6. 返回文件 ID 和元数据",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 4
+          },
+          {
+            "id": 2,
+            "title": "实现文件下载和访问功能",
+            "description": "实现 download_audio_file() 和 get_audio_file_url() 方法",
+            "details": "实现文件访问功能：\\n1. 根据文件 ID 获取存储路径\\n2. 生成预签名访问 URL\\n3. 实现流式文件下载\\n4. 添加访问权限验证\\n5. 实现下载统计记录",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 4
+          },
+          {
+            "id": 3,
+            "title": "实现批量操作功能",
+            "description": "实现 upload_batch_files() 和批量删除功能",
+            "details": "实现批量文件操作：\\n1. 并行批量文件上传\\n2. 批量文件删除\\n3. 批量操作进度跟踪\\n4. 部分失败处理策略\\n5. 批量操作结果汇总",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 4
+          },
+          {
+            "id": 4,
+            "title": "实现存储统计和清理功能",
+            "description": "实现 get_storage_stats() 和 cleanup_temp_files() 方法",
+            "details": "实现存储管理功能：\\n1. 计算存储空间使用统计\\n2. 分析文件类型分布\\n3. 实现临时文件自动清理\\n4. 生成存储报告\\n5. 实现存储容量告警",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 4
+          }
+        ]
       },
       {
         "id": 5,
-        "title": "集成 PostgreSQL 数据库",
-        "description": "配置数据库连接，设计表结构",
-        "status": "done",
+        "title": "数据库表结构扩展",
+        "description": "扩展数据库表以支持 MinIO 对象存储元数据",
+        "status": "pending",
         "priority": "medium",
         "dependencies": [
           1
         ],
-        "details": "使用 SQLAlchemy ORM，设计识别记录、用户、声纹特征等表",
-        "testStrategy": "验证数据库连接和基本 CRUD 操作"
+        "details": "根据 PRD 第3.1.3节执行数据库迁移：\n1. 扩展 audio_files 表添加 MinIO 相关字段\n2. 创建 file_versions 表支持版本管理\n3. 添加必要的索引优化查询性能\n4. 创建数据迁移脚本\n5. 验证数据完整性",
+        "testStrategy": "数据库迁移测试，数据完整性验证，查询性能测试",
+        "subtasks": []
       },
       {
         "id": 6,
-        "title": "实现 pgvector 声纹存储",
-        "description": "使用 pgvector 扩展存储和检索声纹向量",
-        "status": "done",
-        "priority": "medium",
+        "title": "VADProcessor 统一接口实现",
+        "description": "实现统一的 VAD 处理器接口和配置管理",
+        "status": "pending",
+        "priority": "high",
         "dependencies": [
-          5,
-          3
+          2
         ],
-        "details": "在 core/speaker_pool.py 中实现声纹向量的存储、相似度搜索",
-        "testStrategy": "测试声纹向量存储和相似度匹配准确性"
+        "details": "根据 PRD 第3.2.2节实现：\n1. VADProcessor 类核心接口\n2. detect_speech_segments() 统一检测方法\n3. process_streaming_audio() 流式处理\n4. configure() 动态配置接口\n5. get_stats() 统计信息接口\n6. VADConfig 配置类实现",
+        "testStrategy": "功能测试验证各接口正确性，性能测试对比原实现",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "实现 detect_speech_segments 方法",
+            "description": "实现统一的语音段落检测接口",
+            "details": "实现核心检测方法：\\n1. 音频预处理和格式转换\\n2. VAD 模型推理执行\\n3. 结果后处理和过滤\\n4. 段落边界优化\\n5. 返回标准化结果格式",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 6
+          },
+          {
+            "id": 2,
+            "title": "实现 process_streaming_audio 方法",
+            "description": "实现流式音频 VAD 处理",
+            "details": "实现流式处理：\\n1. 实现音频块缓冲机制\\n2. 实现重叠处理策略\\n3. 实现实时段落检测\\n4. 处理音频流中断情况\\n5. 优化延迟和准确性平衡",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 6
+          },
+          {
+            "id": 3,
+            "title": "实现动态配置和统计功能",
+            "description": "实现 configure() 和 get_stats() 方法",
+            "details": "实现管理功能：\\n1. 动态参数配置接口\\n2. 配置变更验证和应用\\n3. 处理统计信息收集\\n4. 性能指标计算\\n5. 统计数据导出功能",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 6
+          }
+        ]
       },
       {
         "id": 7,
-        "title": "构建并发处理系统",
-        "description": "实现异步队列和并发处理机制",
-        "status": "done",
+        "title": "现有代码 VAD 调用重构",
+        "description": "重构项目中所有使用 VAD 的代码点，统一使用新的 VADProcessor",
+        "status": "pending",
         "priority": "medium",
         "dependencies": [
-          4
+          6
         ],
-        "details": "使用 asyncio.Queue 和 ThreadPoolExecutor 管理并发请求",
-        "testStrategy": "压力测试并发处理能力和响应时间"
+        "details": "重构以下模块中的 VAD 调用：\n1. app/core/model.py 中的模型管理器\n2. app/core/pipeline.py 中的流水线编排器  \n3. app/core/websocket_manager.py 中的 WebSocket 处理\n4. 确保所有调用点使用统一接口\n5. 移除重复的 VAD 初始化代码",
+        "testStrategy": "回归测试确保重构后功能正常，集成测试验证各模块协作",
+        "subtasks": []
       },
       {
         "id": 8,
-        "title": "实现 WebSocket 实时通信",
-        "description": "支持实时语音流处理和识别结果推送",
-        "status": "done",
-        "priority": "low",
+        "title": "优化批次处理器实现",
+        "description": "实现新的 OptimizedBatchProcessor 类，支持二阶段并行处理",
+        "status": "pending",
+        "priority": "high",
         "dependencies": [
-          7
+          3
         ],
-        "details": "实现 WebSocket 端点，支持音频流接收和结果实时返回",
-        "testStrategy": "测试实时音频流处理和延迟"
+        "details": "根据 PRD 第3.3.2节实现：\n1. process_segments_optimized() 主处理方法\n2. _parallel_asr_processing() 阶段1 ASR并行\n3. _parallel_post_processing() 阶段2 后处理并行\n4. 线程池管理和资源控制\n5. 错误处理和降级机制",
+        "testStrategy": "性能基准测试，并发压力测试，错误场景测试",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "实现 _parallel_asr_processing 方法",
+            "description": "实现阶段1的ASR批次并行处理",
+            "details": "实现ASR并行处理：\\n1. 批次任务队列管理\\n2. ASR 线程池管理\\n3. 批次结果收集\\n4. 错误处理和重试\\n5. 进度跟踪和监控",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 8
+          },
+          {
+            "id": 2,
+            "title": "实现线程池资源管理",
+            "description": "实现智能的线程池和资源控制",
+            "details": "实现资源管理：\\n1. 动态线程池大小调整\\n2. 内存使用监控和限制\\n3. CPU 使用率优化\\n4. 任务队列管理\\n5. 资源竞争检测",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 8
+          },
+          {
+            "id": 3,
+            "title": "实现错误处理和降级机制",
+            "description": "实现健壮的错误处理和降级策略",
+            "details": "实现容错机制：\\n1. 单个批次失败处理\\n2. 部分任务失败恢复\\n3. 资源不足时的降级策略\\n4. 超时处理机制\\n5. 故障诊断和日志记录",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 8
+          }
+        ]
       },
       {
         "id": 9,
-        "title": "添加日志和监控",
-        "description": "集成日志系统和性能监控",
-        "status": "done",
-        "priority": "low",
+        "title": "后处理并行机制实现",
+        "description": "实现标点处理和声纹识别的并行执行机制",
+        "status": "pending",
+        "priority": "medium",
         "dependencies": [
-          4
+          8
         ],
-        "details": "使用 structlog 记录日志，集成 Prometheus 指标监控",
-        "testStrategy": "验证日志记录完整性和监控指标准确性"
+        "details": "根据 PRD 第3.3.3节实现：\n1. 并行任务调度器\n2. 标点处理线程池\n3. 声纹识别线程池\n4. 结果收集和合并逻辑\n5. 超时和异常处理机制",
+        "testStrategy": "并行处理正确性验证，性能提升验证，异常处理测试",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "实现并行任务调度器",
+            "description": "实现标点和声纹识别的并行调度",
+            "details": "实现并行调度：\\n1. 任务分发策略\\n2. 负载均衡算法\\n3. 依赖关系管理\\n4. 优先级队列\\n5. 并行度动态调整",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 9
+          },
+          {
+            "id": 2,
+            "title": "实现标点处理线程池",
+            "description": "实现专门的标点处理并行机制",
+            "details": "实现标点处理：\\n1. 专用标点处理线程池\\n2. 文本批次分组策略\\n3. 标点模型负载均衡\\n4. 处理结果缓存\\n5. 性能监控和优化",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 9
+          },
+          {
+            "id": 3,
+            "title": "实现声纹识别线程池",
+            "description": "实现专门的声纹识别并行机制",
+            "details": "实现声纹识别：\\n1. 专用声纹识别线程池\\n2. 音频特征提取优化\\n3. 声纹模型并行推理\\n4. 识别结果缓存机制\\n5. 相似度计算优化",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 9
+          },
+          {
+            "id": 4,
+            "title": "实现结果收集和合并机制",
+            "description": "实现并行处理结果的收集和合并",
+            "details": "实现结果合并：\\n1. 异步结果收集机制\\n2. 结果顺序保证\\n3. 部分失败处理\\n4. 超时和异常处理\\n5. 最终结果格式化",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 9
+          }
+        ]
       },
       {
         "id": 10,
-        "title": "编写测试和文档",
-        "description": "完善单元测试、集成测试和 API 文档",
+        "title": "配置参数扩展和管理",
+        "description": "扩展系统配置支持所有新增功能的参数管理",
+        "status": "pending",
+        "priority": "medium",
+        "dependencies": [],
+        "details": "根据 PRD 第4节扩展 app/config.py：\n1. MinIO 存储配置参数\n2. VAD 统一配置参数\n3. 批次处理优化配置\n4. 环境变量映射\n5. 配置验证和默认值设置",
+        "testStrategy": "配置加载测试，参数验证测试，环境变量覆盖测试",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "扩展 MinIO 配置参数",
+            "description": "在 app/config.py 中添加 MinIO 相关配置",
+            "details": "添加 MinIO 配置：\\n1. MINIO_ENDPOINT 配置\\n2. MINIO_ACCESS_KEY/SECRET_KEY\\n3. 桶名称配置\\n4. 文件大小限制配置\\n5. 清理策略配置",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 10
+          },
+          {
+            "id": 2,
+            "title": "扩展 VAD 配置参数",
+            "description": "添加统一的 VAD 配置参数",
+            "details": "添加 VAD 配置：\\n1. VAD_MODEL_PATH 配置\\n2. VAD 阈值和时长参数\\n3. VAD 缓冲区配置\\n4. VAD 线程数配置\\n5. VAD 性能参数",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 10
+          },
+          {
+            "id": 3,
+            "title": "扩展批次处理配置",
+            "description": "添加优化后的批次处理配置参数",
+            "details": "添加批次处理配置：\\n1. 优化开关配置\\n2. 阶段1 ASR 配置参数\\n3. 阶段2 后处理配置\\n4. 性能调优参数\\n5. 并行度配置",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 10
+          }
+        ]
+      },
+      {
+        "id": 11,
+        "title": "API 接口集成更新",
+        "description": "更新现有 API 接口以支持新的存储和处理功能",
+        "status": "pending",
+        "priority": "medium",
+        "dependencies": [
+          4,
+          5
+        ],
+        "details": "更新以下 API 模块：\n1. app/api/asr.py - 集成新的存储服务\n2. app/api/pipeline.py - 使用优化的批次处理\n3. app/api/comprehensive.py - 更新完整处理流程\n4. 添加文件管理相关的新 API 端点\n5. 更新 API 文档和示例",
+        "testStrategy": "API 功能测试，接口兼容性测试，性能对比测试",
+        "subtasks": []
+      },
+      {
+        "id": 12,
+        "title": "系统集成测试和性能验证",
+        "description": "进行完整的系统集成测试和性能验证",
+        "status": "pending",
+        "priority": "high",
+        "dependencies": [
+          9,
+          10,
+          11
+        ],
+        "details": "执行完整的验证流程：\n1. 单元测试覆盖率验证\n2. 集成测试验证各模块协作\n3. 性能基准测试和对比\n4. 并发压力测试\n5. 内存使用和资源监控\n6. 向后兼容性验证",
+        "testStrategy": "自动化测试套件执行，性能报告生成，兼容性验证报告",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "实现性能基准测试",
+            "description": "构建性能对比和基准测试套件",
+            "details": "实现性能测试：\\n1. 设计性能测试用例\\n2. 实现批次处理性能对比\\n3. VAD 处理效率测试\\n4. 存储操作性能测试\\n5. 生成性能报告",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 12
+          },
+          {
+            "id": 2,
+            "title": "实现向后兼容性验证",
+            "description": "确保优化后系统的向后兼容性",
+            "details": "验证兼容性：\\n1. API 接口兼容性测试\\n2. 数据格式兼容性验证\\n3. 配置迁移测试\\n4. 功能回归测试\\n5. 用户体验一致性验证",
+            "status": "pending",
+            "dependencies": [],
+            "parentTaskId": 12
+          }
+        ]
+      },
+      {
+        "id": 13,
+        "title": "部署配置和文档更新",
+        "description": "更新部署配置和相关文档",
         "status": "pending",
         "priority": "low",
         "dependencies": [
-          8,
-          9
+          12
         ],
-        "details": "使用 pytest 编写测试，生成 OpenAPI 文档",
-        "testStrategy": "达到 80% 以上测试覆盖率"
+        "details": "完成项目交付准备：\n1. 更新 Docker 配置文件\n2. 更新 docker-compose 配置\n3. 更新部署脚本和环境变量\n4. 更新 API 文档\n5. 编写优化功能使用指南\n6. 更新 README 和 CHANGELOG",
+        "testStrategy": "部署验证测试，文档准确性检查",
+        "subtasks": []
       }
     ],
     "metadata": {
-      "createdAt": "2025-09-20T19:23:41+08:00",
-      "description": "语音识别服务任务列表",
-      "totalTasks": 10,
-      "created": "2025-09-20T11:45:00.930Z",
-      "updated": "2025-09-20T15:10:32.184Z"
+      "version": "1.0",
+      "created": "2025-01-27",
+      "description": "语音识别服务优化第二版任务列表",
+      "lastModified": "2025-01-27",
+      "updated": "2025-09-22T03:01:25.790Z"
     }
   }
 }

@@ -1,0 +1,36 @@
+# Task ID: 10
+# Title: 配置参数扩展和管理
+# Status: pending
+# Dependencies: None
+# Priority: medium
+# Description: 扩展系统配置支持所有新增功能的参数管理
+# Details:
+根据 PRD 第4节扩展 app/config.py：
+1. MinIO 存储配置参数
+2. VAD 统一配置参数
+3. 批次处理优化配置
+4. 环境变量映射
+5. 配置验证和默认值设置
+
+# Test Strategy:
+配置加载测试，参数验证测试，环境变量覆盖测试
+
+# Subtasks:
+## 1. 扩展 MinIO 配置参数 [pending]
+### Dependencies: None
+### Description: 在 app/config.py 中添加 MinIO 相关配置
+### Details:
+添加 MinIO 配置：\n1. MINIO_ENDPOINT 配置\n2. MINIO_ACCESS_KEY/SECRET_KEY\n3. 桶名称配置\n4. 文件大小限制配置\n5. 清理策略配置
+
+## 2. 扩展 VAD 配置参数 [pending]
+### Dependencies: None
+### Description: 添加统一的 VAD 配置参数
+### Details:
+添加 VAD 配置：\n1. VAD_MODEL_PATH 配置\n2. VAD 阈值和时长参数\n3. VAD 缓冲区配置\n4. VAD 线程数配置\n5. VAD 性能参数
+
+## 3. 扩展批次处理配置 [pending]
+### Dependencies: None
+### Description: 添加优化后的批次处理配置参数
+### Details:
+添加批次处理配置：\n1. 优化开关配置\n2. 阶段1 ASR 配置参数\n3. 阶段2 后处理配置\n4. 性能调优参数\n5. 并行度配置
+

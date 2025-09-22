@@ -1,0 +1,16 @@
+# Task ID: 11
+# Title: API 接口集成更新
+# Status: pending
+# Dependencies: 4, 5
+# Priority: medium
+# Description: 更新现有 API 接口以支持新的存储和处理功能
+# Details:
+更新以下 API 模块：
+1. app/api/asr.py - 集成新的存储服务
+2. app/api/pipeline.py - 使用优化的批次处理
+3. app/api/comprehensive.py - 更新完整处理流程
+4. 添加文件管理相关的新 API 端点
+5. 更新 API 文档和示例
+
+# Test Strategy:
+API 功能测试，接口兼容性测试，性能对比测试

@@ -20,7 +20,16 @@ class Settings:
     MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "localhost:9000")
     MINIO_ACCESS_KEY: str = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
     MINIO_SECRET_KEY: str = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+    MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "false").lower() == "true"
     MINIO_BUCKET: str = os.getenv("MINIO_BUCKET", "audio-files")
+    MINIO_TEMP_BUCKET: str = os.getenv("MINIO_TEMP_BUCKET", "temp-files")
+    MINIO_BACKUP_BUCKET: str = os.getenv("MINIO_BACKUP_BUCKET", "backup-files")
+    
+    # 文件存储配置
+    MAX_FILE_SIZE: int = int(os.getenv("MAX_FILE_SIZE", "100")) * 1024 * 1024  # 100MB
+    TEMP_FILE_CLEANUP_HOURS: int = int(os.getenv("TEMP_FILE_CLEANUP_HOURS", "24"))
+    ENABLE_FILE_VERSIONING: bool = os.getenv("ENABLE_FILE_VERSIONING", "false").lower() == "true"
+    ENABLE_FILE_DEDUPLICATION: bool = os.getenv("ENABLE_FILE_DEDUPLICATION", "true").lower() == "true"
     
     # 模型配置
     MODELS_DIR: str = os.getenv("MODELS_DIR", "./models")

@@ -1,0 +1,16 @@
+# Task ID: 5
+# Title: 数据库表结构扩展
+# Status: pending
+# Dependencies: 1
+# Priority: medium
+# Description: 扩展数据库表以支持 MinIO 对象存储元数据
+# Details:
+根据 PRD 第3.1.3节执行数据库迁移：
+1. 扩展 audio_files 表添加 MinIO 相关字段
+2. 创建 file_versions 表支持版本管理
+3. 添加必要的索引优化查询性能
+4. 创建数据迁移脚本
+5. 验证数据完整性
+
+# Test Strategy:
+数据库迁移测试，数据完整性验证，查询性能测试

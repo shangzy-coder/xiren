@@ -1,0 +1,16 @@
+# Task ID: 7
+# Title: 现有代码 VAD 调用重构
+# Status: pending
+# Dependencies: 6
+# Priority: medium
+# Description: 重构项目中所有使用 VAD 的代码点，统一使用新的 VADProcessor
+# Details:
+重构以下模块中的 VAD 调用：
+1. app/core/model.py 中的模型管理器
+2. app/core/pipeline.py 中的流水线编排器  
+3. app/core/websocket_manager.py 中的 WebSocket 处理
+4. 确保所有调用点使用统一接口
+5. 移除重复的 VAD 初始化代码
+
+# Test Strategy:
+回归测试确保重构后功能正常，集成测试验证各模块协作
