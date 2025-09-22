@@ -15,8 +15,15 @@ import json
 
 from minio import Minio
 from minio.error import S3Error
-from minio.commonconfig import CopySource
-from minio.lifecycle import LifecycleConfig, Rule, Expiration
+try:
+    from minio.commonconfig import CopySource
+    from minio.lifecycle import LifecycleConfig, Rule, Expiration
+except ImportError:
+    # 处理旧版本的MinIO
+    CopySource = None
+    LifecycleConfig = None
+    Rule = None
+    Expiration = None
 import httpx
 
 from app.config import settings
@@ -120,17 +127,20 @@ class MinIOClient:
     async def _set_temp_bucket_lifecycle(self, bucket_name: str):
         """为临时文件桶设置生命周期策略"""
         try:
-            # 设置自动清理规则
-            lifecycle_config = LifecycleConfig([
-                Rule(
-                    rule_id="temp_file_cleanup",
-                    rule_filter=None,
-                    rule_status="Enabled",
-                    expiration=Expiration(days=settings.TEMP_FILE_CLEANUP_HOURS // 24 or 1)
-                )
-            ])
-            self.client.set_bucket_lifecycle(bucket_name, lifecycle_config)
-            logger.info(f"为存储桶 {bucket_name} 设置生命周期策略")
+            if LifecycleConfig and Rule and Expiration:
+                # 设置自动清理规则
+                lifecycle_config = LifecycleConfig([
+                    Rule(
+                        rule_id="temp_file_cleanup",
+                        rule_filter=None,
+                        rule_status="Enabled",
+                        expiration=Expiration(days=settings.TEMP_FILE_CLEANUP_HOURS // 24 or 1)
+                    )
+                ])
+                self.client.set_bucket_lifecycle(bucket_name, lifecycle_config)
+                logger.info(f"为存储桶 {bucket_name} 设置生命周期策略")
+            else:
+                logger.warning(f"MinIO lifecycle功能不可用，跳过为存储桶 {bucket_name} 设置生命周期策略")
         except Exception as e:
             logger.warning(f"设置生命周期策略失败: {e}")
 
@@ -171,6 +181,19 @@ class StorageService:
             if not file_path_obj.exists():
                 raise FileNotFoundError(f"文件不存在: {file_path}")
             
+            # 文件大小检查
+            file_size = file_path_obj.stat().st_size
+            if file_size > settings.MAX_FILE_SIZE:
+                raise ValueError(f"文件大小超出限制: {file_size} > {settings.MAX_FILE_SIZE}")
+            
+            # 文件格式验证
+            filename = filename or file_path_obj.name
+            if not self._is_supported_format(filename):
+                raise ValueError(f"不支持的文件格式: {Path(filename).suffix}")
+            
+            # 生成唯一文件名避免冲突
+            filename = await self._generate_unique_filename(filename, bucket or settings.MINIO_BUCKET)
+            
             # 计算文件哈希
             file_hash = await self._calculate_file_hash(file_path)
             
@@ -183,8 +206,6 @@ class StorageService:
             
             # 准备上传参数
             bucket = bucket or settings.MINIO_BUCKET
-            filename = filename or file_path_obj.name
-            file_size = file_path_obj.stat().st_size
             content_type = self._get_content_type(filename)
             
             # 准备元数据
@@ -524,6 +545,46 @@ class StorageService:
             '.webm': 'video/webm'
         }
         return content_types.get(ext, 'application/octet-stream')
+    
+    def _is_supported_format(self, filename: str) -> bool:
+        """检查文件格式是否受支持"""
+        ext = Path(filename).suffix.lower().lstrip('.')
+        return ext in settings.SUPPORTED_FORMATS
+    
+    async def _generate_unique_filename(self, filename: str, bucket: str) -> str:
+        """生成唯一的文件名，避免冲突"""
+        base_name = Path(filename).stem
+        extension = Path(filename).suffix
+        counter = 0
+        
+        original_filename = filename
+        
+        # 检查文件是否已存在
+        while True:
+            try:
+                # 尝试获取文件信息，如果成功说明文件存在
+                self.minio_client.client.stat_object(bucket, filename)
+                
+                # 文件存在，生成新的文件名
+                counter += 1
+                filename = f"{base_name}_{counter}{extension}"
+                
+            except S3Error as e:
+                if e.code == "NoSuchKey":
+                    # 文件不存在，可以使用这个文件名
+                    break
+                else:
+                    # 其他错误，记录并返回原始文件名
+                    logger.warning(f"检查文件存在性时出错: {e}")
+                    return original_filename
+            except Exception as e:
+                logger.warning(f"生成唯一文件名时出错: {e}")
+                return original_filename
+        
+        if counter > 0:
+            logger.info(f"文件名冲突，已重命名: {original_filename} -> {filename}")
+        
+        return filename
     
     async def close(self):
         """关闭存储服务"""
