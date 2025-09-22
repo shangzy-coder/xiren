@@ -4,5 +4,6 @@
 # GPU版本的机器学习库
 onnxruntime-gpu>=1.22.0
 
-# GPU版本的语音识别 (支持CUDA)
+# GPU版本的语音识别 - 使用CUDA wheel包
+--extra-index-url https://huggingface.co/csukuangfj/sherpa-onnx-wheels/resolve/main/cuda/
 sherpa-onnx>=1.12.0

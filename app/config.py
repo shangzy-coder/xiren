@@ -7,7 +7,7 @@ from typing import Optional
 class Settings:
     # 服务配置
     HOST: str = os.getenv("HOST", "0.0.0.0")
-    PORT: int = int(os.getenv("PORT", "8000"))
+    PORT: int = int(os.getenv("PORT", "8001"))
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
     
     # 数据库配置
@@ -24,7 +24,7 @@ class Settings:
     
     # 模型配置
     MODELS_DIR: str = os.getenv("MODELS_DIR", "./models")
-    ASR_MODEL_PATH: str = os.getenv("ASR_MODEL_PATH", "./models/asr/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09")
+    ASR_MODEL_PATH: str = os.getenv("ASR_MODEL_PATH", "./models/asr/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17")
     SPEAKER_MODEL_PATH: str = os.getenv("SPEAKER_MODEL_PATH", "./models/speaker-recongition/3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k.onnx")
     VAD_MODEL_PATH: str = os.getenv("VAD_MODEL_PATH", "./models/vad/silero_vad.onnx")
     PUNCTUATION_MODEL_PATH: str = os.getenv("PUNCTUATION_MODEL_PATH", "./models/punction/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8")
@@ -55,7 +55,7 @@ class Settings:
     PUNCTUATION_THREADS_PER_BATCH: int = int(os.getenv("PUNCTUATION_THREADS_PER_BATCH", "2"))  # 每个批次的标点线程数
     
     # 设备配置
-    DEVICE_TYPE: str = os.getenv("DEVICE_TYPE", "auto")  # auto, cpu, gpu
+    DEVICE_TYPE: str = os.getenv("DEVICE_TYPE", "gpu")  # auto, cpu, gpu
     
     # 声纹配置
     SPEAKER_EMBEDDING_DIM: int = int(os.getenv("SPEAKER_EMBEDDING_DIM", "512"))
@@ -72,7 +72,7 @@ class Settings:
     # 模型预加载配置
     ENABLE_MODEL_PRELOAD: bool = os.getenv("ENABLE_MODEL_PRELOAD", "true").lower() == "true"
     DEFAULT_MODEL_TYPE: str = os.getenv("DEFAULT_MODEL_TYPE", "sense_voice")
-    DEFAULT_USE_GPU: bool = os.getenv("DEFAULT_USE_GPU", "false").lower() == "true"
+    DEFAULT_USE_GPU: bool = os.getenv("DEFAULT_USE_GPU", "true").lower() == "true"
     DEFAULT_ENABLE_VAD: bool = os.getenv("DEFAULT_ENABLE_VAD", "true").lower() == "true"
     DEFAULT_ENABLE_SPEAKER_ID: bool = os.getenv("DEFAULT_ENABLE_SPEAKER_ID", "true").lower() == "true"
     DEFAULT_ENABLE_PUNCTUATION: bool = os.getenv("DEFAULT_ENABLE_PUNCTUATION", "true").lower() == "true"
