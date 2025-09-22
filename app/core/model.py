@@ -354,7 +354,7 @@ class ASRModelManager:
         try:
             if enable_vad and self.vad is not None:
                 # 使用VAD分割音频
-                segments = self._segment_audio_with_vad(audio_samples, sample_rate)
+                segments = await self._segment_audio_with_vad(audio_samples, sample_rate)
             else:
                 # 不使用VAD，整段识别
                 segments = [{
@@ -397,97 +397,58 @@ class ASRModelManager:
                 'statistics': {}
             }
 
-    def _segment_audio_with_vad(
+    async def _segment_audio_with_vad(
         self,
         audio_samples: np.ndarray,
         sample_rate: int
     ) -> List[Dict[str, Any]]:
-        """使用VAD分割音频 - 参考demo实现"""
-
-        if self.vad is None:
-            # VAD不可用，返回整段音频
-            return [{
-                'samples': audio_samples,
-                'sample_rate': sample_rate,
-                'start_time': 0.0,
-                'end_time': len(audio_samples) / sample_rate
-            }]
-
-        segments = []
+        """使用统一VAD处理器分割音频"""
 
         try:
-            # 重新创建VAD实例以确保状态清零
-            # 这是关键：每次处理新音频时都重新创建VAD，避免累积时间戳问题
-            vad_config = sherpa_onnx.VadModelConfig()
-            vad_config.silero_vad.model = str(Path(settings.VAD_MODEL_PATH))
-            vad_config.silero_vad.threshold = 0.5
-            vad_config.silero_vad.min_silence_duration = 0.25  # 最小静音时长（秒）
-            vad_config.silero_vad.min_speech_duration = 0.25   # 最小语音时长（秒）
-            vad_config.silero_vad.max_speech_duration = 5.0    # 最大语音时长（秒）
-            vad_config.sample_rate = sample_rate
-            vad_config.num_threads = 2
-            vad_config.provider = "cpu"  # VAD通常用CPU就足够了
-
-            # 创建新的VAD实例
-            fresh_vad = sherpa_onnx.VoiceActivityDetector(vad_config, buffer_size_in_seconds=30)
-
-            # 获取窗口大小
-            window_size = vad_config.silero_vad.window_size
-            total_samples_processed = 0
-
-            logger.debug(f"开始VAD分割，音频长度: {len(audio_samples)}，窗口大小: {window_size}")
-
-            # 处理音频数据 - 使用完整窗口
-            while len(audio_samples) > total_samples_processed + window_size:
-                chunk = audio_samples[total_samples_processed:total_samples_processed + window_size]
-                fresh_vad.accept_waveform(chunk)
-                total_samples_processed += window_size
-
-                # 获取检测到的语音段落
-                while not fresh_vad.empty():
-                    segment_samples = fresh_vad.front.samples
-                    start_time = fresh_vad.front.start / sample_rate  # 这里的start是相对于音频开始的采样点数
-                    duration = len(segment_samples) / sample_rate
-                    end_time = start_time + duration
-
-                    segments.append({
-                        'samples': segment_samples,
-                        'sample_rate': sample_rate,
-                        'start_time': start_time,
-                        'end_time': end_time
-                    })
-
-                    fresh_vad.pop()
-
-            # 处理剩余的音频数据
-            fresh_vad.flush()
-            while not fresh_vad.empty():
-                segment_samples = fresh_vad.front.samples
-                start_time = fresh_vad.front.start / sample_rate
-                duration = len(segment_samples) / sample_rate
-                end_time = start_time + duration
-
+            # 使用统一的VAD处理器
+            from app.core.vad import get_vad_processor
+            
+            vad_processor = await get_vad_processor()
+            speech_segments = await vad_processor.detect_speech_segments(
+                audio_samples, 
+                sample_rate, 
+                return_samples=True  # ASR需要音频样本
+            )
+            
+            # 转换为ASR期望的格式
+            segments = []
+            for segment in speech_segments:
                 segments.append({
-                    'samples': segment_samples,
+                    'samples': segment.samples if segment.samples is not None else audio_samples[
+                        int(segment.start * sample_rate):int(segment.end * sample_rate)
+                    ],
                     'sample_rate': sample_rate,
-                    'start_time': start_time,
-                    'end_time': end_time
+                    'start_time': segment.start,
+                    'end_time': segment.end
                 })
-
-                fresh_vad.pop()
+            
+            if not segments:
+                # 如果没有检测到语音段落，返回整段音频
+                logger.info("VAD未检测到语音段落，使用整段音频")
+                segments = [{
+                    'samples': audio_samples,
+                    'sample_rate': sample_rate,
+                    'start_time': 0.0,
+                    'end_time': len(audio_samples) / sample_rate
+                }]
+            
+            logger.debug(f"VAD分割完成: 检测到 {len(segments)} 个语音段落")
+            return segments
 
         except Exception as e:
-            logger.error(f"VAD分割失败: {e}")
-            # 分割失败，返回整段音频
+            logger.error(f"VAD分割失败: {e}，使用整段音频")
+            # VAD失败时返回整段音频
             return [{
                 'samples': audio_samples,
                 'sample_rate': sample_rate,
                 'start_time': 0.0,
                 'end_time': len(audio_samples) / sample_rate
             }]
-
-        logger.info(f"VAD分割完成，得到 {len(segments)} 个语音段落")
-        return segments
 
     async def _parallel_recognize_segments(
         self,

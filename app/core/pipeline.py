@@ -396,16 +396,16 @@ async def _process_vad(pipeline_id: str, audio_data: np.ndarray, sample_rate: in
         # 提取语音段音频
         vad_segments = []
         for segment in segments:
-            start_sample = int(segment["start"] * sample_rate)
-            end_sample = int(segment["end"] * sample_rate)
+            start_sample = int(segment.start * sample_rate)
+            end_sample = int(segment.end * sample_rate)
             segment_audio = audio_data[start_sample:end_sample]
             
             vad_segments.append({
-                "start": segment["start"],
-                "end": segment["end"],
-                "duration": segment["end"] - segment["start"],
+                "start": segment.start,
+                "end": segment.end,
+                "duration": segment.duration,
                 "audio": segment_audio,
-                "confidence": segment.get("confidence", 1.0)
+                "confidence": segment.confidence
             })
         
         pipeline_data.vad_segments = vad_segments

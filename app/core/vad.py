@@ -18,6 +18,7 @@ import sherpa_onnx
 
 from app.config import settings
 from app.utils.metrics import MetricsCollector
+from app.utils.audio import audio_processor
 
 logger = logging.getLogger(__name__)
 
@@ -223,15 +224,17 @@ class VADProcessor:
         return_samples: bool = False
     ) -> List[SpeechSegment]:
         """
-        检测音频中的语音段落
+        检测音频中的语音段落（VAD核心服务接口）
+        
+        专注于语音活动检测，为ASR、说话人识别等模块提供服务
         
         Args:
-            audio_data: 音频数据 (float32)
+            audio_data: 音频数据 (float32，已预处理)
             sample_rate: 采样率，如果为None则使用配置中的默认值
-            return_samples: 是否返回音频样本数据
+            return_samples: 是否返回音频样本数据（通常为False）
             
         Returns:
-            检测到的语音段落列表
+            检测到的语音段落列表，包含时间戳信息
         """
         if not self._initialized:
             await self.initialize()
@@ -245,26 +248,73 @@ class VADProcessor:
         audio_duration = len(audio_data) / sample_rate
         
         try:
-            # 为了避免状态累积，每次都创建新的VAD实例
+            # VAD处理：使用全新实例避免状态累积
             segments = await self._process_audio_with_fresh_vad(audio_data, sample_rate, return_samples)
+            
+            # 过滤过短的段落（基于配置）
+            filtered_segments = []
+            for segment in segments:
+                if segment.duration >= self.config.min_speech_duration:
+                    filtered_segments.append(segment)
+                else:
+                    logger.debug(f"过滤过短语音段落: {segment.duration:.3f}s < {self.config.min_speech_duration}s")
             
             # 更新统计信息
             processing_time = time.time() - start_time
-            speech_duration = sum(seg.duration for seg in segments)
-            self.stats.update_processing_stats(audio_duration, processing_time, len(segments), speech_duration)
+            speech_duration = sum(seg.duration for seg in filtered_segments)
+            self.stats.update_processing_stats(audio_duration, processing_time, len(filtered_segments), speech_duration)
             
             # 性能监控
             if self.metrics_collector:
                 self.metrics_collector.record_processing_time("vad", processing_time)
-                self.metrics_collector.record_counter("vad_segments_detected", len(segments))
+                self.metrics_collector.record_counter("vad_segments_detected", len(filtered_segments))
+                self.metrics_collector.record_gauge("vad_speech_ratio", speech_duration / audio_duration if audio_duration > 0 else 0)
             
-            logger.debug(f"VAD检测完成: {len(segments)}个段落, 耗时: {processing_time:.3f}秒")
-            return segments
+            logger.debug(f"VAD检测完成: {len(filtered_segments)}个有效段落, 语音比例: {speech_duration/audio_duration:.2%}, 耗时: {processing_time:.3f}秒")
+            return filtered_segments
             
         except Exception as e:
             logger.error(f"VAD语音检测失败: {e}")
             self.stats.error_count += 1
+            if self.metrics_collector:
+                self.metrics_collector.record_counter("vad_errors", 1)
             return []
+    
+    async def is_speech_active(
+        self, 
+        audio_data: np.ndarray, 
+        sample_rate: Optional[int] = None,
+        min_speech_ratio: float = 0.3
+    ) -> bool:
+        """
+        简单的语音活动检测（布尔值返回）
+        
+        用于快速判断音频片段是否包含语音，适用于：
+        - 流式处理中的实时判断
+        - 预处理阶段的快速筛选
+        - 降低后续处理的计算负载
+        
+        Args:
+            audio_data: 音频数据片段
+            sample_rate: 采样率
+            min_speech_ratio: 最小语音比例阈值（0.3表示30%以上为语音才返回True）
+            
+        Returns:
+            True如果检测到足够的语音活动，False否则
+        """
+        segments = await self.detect_speech_segments(audio_data, sample_rate, return_samples=False)
+        
+        if not segments:
+            return False
+        
+        audio_duration = len(audio_data) / (sample_rate or self.config.sample_rate)
+        speech_duration = sum(seg.duration for seg in segments)
+        speech_ratio = speech_duration / audio_duration if audio_duration > 0 else 0
+        
+        is_active = speech_ratio >= min_speech_ratio
+        logger.debug(f"语音活动检测: {speech_ratio:.2%} >= {min_speech_ratio:.2%} = {is_active}")
+        
+        return is_active
     
     async def _process_audio_with_fresh_vad(
         self, 
@@ -367,18 +417,22 @@ class VADProcessor:
     async def process_streaming_audio(
         self, 
         audio_chunk: np.ndarray, 
-        sample_rate: Optional[int] = None
+        sample_rate: Optional[int] = None,
+        return_samples: bool = False
     ) -> List[SpeechSegment]:
         """
-        处理流式音频数据
-        注意：流式处理需要维护VAD状态，适用于实时音频流
+        处理流式音频数据（为WebSocket、实时处理提供服务）
+        
+        维护VAD状态，适用于连续的音频流处理
+        主要服务于：websocket_manager、实时ASR等
         
         Args:
             audio_chunk: 音频块数据
             sample_rate: 采样率
+            return_samples: 是否返回音频样本（流式处理通常需要）
             
         Returns:
-            本次检测到的语音段落
+            本次检测到的完整语音段落
         """
         if not self._initialized:
             await self.initialize()
@@ -391,26 +445,36 @@ class VADProcessor:
         segments = []
         
         try:
-            # 流式处理使用持久的VAD实例
+            # 流式处理使用持久的VAD实例（保持状态）
             with self._lock:
                 self.vad.accept_waveform(audio_chunk)
                 
-                # 获取检测到的语音段落
+                # 获取检测到的完整语音段落
                 while not self.vad.empty():
                     segment_samples = self.vad.front.samples
                     start_time = self.vad.front.start / sample_rate
                     duration = len(segment_samples) / sample_rate
                     end_time = start_time + duration
                     
-                    segment = SpeechSegment(
-                        start=start_time,
-                        end=end_time,
-                        duration=duration,
-                        confidence=1.0,
-                        samples=segment_samples
-                    )
-                    segments.append(segment)
+                    # 只有满足最小时长要求的段落才返回
+                    if duration >= self.config.min_speech_duration:
+                        segment = SpeechSegment(
+                            start=start_time,
+                            end=end_time,
+                            duration=duration,
+                            confidence=1.0,
+                            samples=segment_samples if return_samples else None
+                        )
+                        segments.append(segment)
+                        logger.debug(f"流式VAD检测到语音段落: {start_time:.2f}s-{end_time:.2f}s ({duration:.2f}s)")
+                    else:
+                        logger.debug(f"流式VAD过滤短段落: {duration:.3f}s < {self.config.min_speech_duration}s")
+                    
                     self.vad.pop()
+            
+            # 更新统计（流式处理的简单统计）
+            if segments and self.metrics_collector:
+                self.metrics_collector.record_counter("vad_streaming_segments", len(segments))
             
             return segments
             
@@ -418,6 +482,22 @@ class VADProcessor:
             logger.error(f"流式VAD处理失败: {e}")
             self.stats.error_count += 1
             return []
+    
+    def reset_streaming_state(self):
+        """
+        重置流式处理状态
+        
+        在音频流结束或切换时调用，清除VAD内部状态
+        """
+        with self._lock:
+            if self.vad:
+                # 刷新剩余的音频数据
+                self.vad.flush()
+                # 重新初始化VAD以清除状态
+                self._initialized = False
+                self.vad = None
+        
+        logger.debug("VAD流式处理状态已重置")
     
     def configure(self, **kwargs) -> bool:
         """动态配置VAD参数"""
@@ -441,20 +521,62 @@ class VADProcessor:
             return False
     
     def get_stats(self) -> Dict[str, Any]:
-        """获取VAD处理统计信息"""
+        """
+        获取VAD处理统计信息（服务状态监控）
+        
+        提供详细的性能指标，用于：
+        - 系统监控和告警
+        - 性能分析和优化
+        - 服务健康检查
+        
+        Returns:
+            包含统计信息的字典
+        """
         stats_dict = asdict(self.stats)
         
-        # 添加配置信息
-        stats_dict['config'] = self.config.to_dict()
-        stats_dict['initialized'] = self._initialized
+        # 服务状态信息
+        stats_dict['service_status'] = {
+            'initialized': self._initialized,
+            'model_loaded': self.vad is not None,
+            'config_valid': True,  # 配置在创建时已验证
+            'last_model_load_time': self.stats.model_load_time
+        }
         
-        # 计算衍生统计
+        # 配置信息（用于调试）
+        stats_dict['current_config'] = self.config.to_dict()
+        
+        # 性能指标
         if self.stats.total_processed_duration > 0:
-            stats_dict['speech_ratio'] = self.stats.total_speech_duration / self.stats.total_processed_duration
-            stats_dict['processing_speed'] = self.stats.total_processed_duration / self.stats.average_processing_time if self.stats.average_processing_time > 0 else 0
+            stats_dict['performance_metrics'] = {
+                'speech_ratio': self.stats.total_speech_duration / self.stats.total_processed_duration,
+                'processing_speed_ratio': self.stats.total_processed_duration / self.stats.average_processing_time if self.stats.average_processing_time > 0 else 0,
+                'segments_per_second': self.stats.total_segments / self.stats.total_processed_duration,
+                'average_segment_duration': self.stats.total_speech_duration / self.stats.total_segments if self.stats.total_segments > 0 else 0,
+                'error_rate': self.stats.error_count / (self.stats.total_segments + self.stats.error_count) if (self.stats.total_segments + self.stats.error_count) > 0 else 0
+            }
         else:
-            stats_dict['speech_ratio'] = 0
-            stats_dict['processing_speed'] = 0
+            stats_dict['performance_metrics'] = {
+                'speech_ratio': 0,
+                'processing_speed_ratio': 0,
+                'segments_per_second': 0,
+                'average_segment_duration': 0,
+                'error_rate': 0
+            }
+        
+        # 内存和资源使用（如果可用）
+        import psutil
+        import os
+        try:
+            process = psutil.Process(os.getpid())
+            stats_dict['resource_usage'] = {
+                'memory_usage_mb': process.memory_info().rss / 1024 / 1024,
+                'cpu_percent': process.cpu_percent(),
+            }
+        except Exception:
+            stats_dict['resource_usage'] = {
+                'memory_usage_mb': 0,
+                'cpu_percent': 0,
+            }
         
         return stats_dict
     
