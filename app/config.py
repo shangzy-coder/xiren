@@ -47,6 +47,14 @@ class Settings:
     VAD_THREADS: int = int(os.getenv("VAD_THREADS", "2"))
     PUNCTUATION_MODEL_PATH: str = os.getenv("PUNCTUATION_MODEL_PATH", "./models/punction/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8")
     
+    # 批次处理优化配置
+    ENABLE_OPTIMIZED_BATCH_PROCESSING: bool = os.getenv("ENABLE_OPTIMIZED_BATCH_PROCESSING", "true").lower() == "true"
+    
+    # 阶段2：后处理并行配置
+    ENABLE_PARALLEL_POST_PROCESSING: bool = os.getenv("ENABLE_PARALLEL_POST_PROCESSING", "true").lower() == "true"
+    POST_PROCESSING_BATCH_SIZE: int = int(os.getenv("POST_PROCESSING_BATCH_SIZE", "50"))
+    POST_PROCESSING_TIMEOUT: int = int(os.getenv("POST_PROCESSING_TIMEOUT", "60"))
+    
     # FFmpeg配置
     FFMPEG_PATH: str = os.getenv("FFMPEG_PATH", "ffmpeg")
     AUDIO_FORMATS: list = ["wav", "mp3", "flac", "m4a", "ogg", "mpga", "amr"]

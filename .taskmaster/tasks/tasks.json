@@ -275,7 +275,7 @@
         "id": 3,
         "title": "批次处理架构优化",
         "description": "优化现有批次处理流程，实现二阶段并行处理",
-        "status": "pending",
+        "status": "done",
         "priority": "high",
         "dependencies": [],
         "details": "根据 PRD 第3.3节要求实现：\n1. 重构 OptimizedBatchProcessor 类\n2. 实现阶段1：ASR批次并行处理\n3. 实现阶段2：后处理并行（标点+声纹）\n4. 添加性能监控指标\n5. 支持动态配置并行参数",
@@ -286,7 +286,7 @@
             "title": "设计二阶段处理架构",
             "description": "设计优化后的批次处理流程架构",
             "details": "设计处理架构：\\n1. 设计阶段1：ASR批次并行架构\\n2. 设计阶段2：后处理并行架构\\n3. 定义阶段间数据传递格式\\n4. 设计资源调度策略\\n5. 定义性能监控指标",
-            "status": "pending",
+            "status": "done",
             "dependencies": [],
             "parentTaskId": 3
           },
@@ -295,7 +295,7 @@
             "title": "分析现有批次处理逻辑",
             "description": "分析现有的 _parallel_recognize_segments 方法",
             "details": "分析现有实现：\\n1. 分析当前批次处理性能瓶颈\\n2. 识别并行处理的限制因素\\n3. 分析资源利用率\\n4. 评估优化潜力\\n5. 设计迁移方案",
-            "status": "pending",
+            "status": "done",
             "dependencies": [],
             "parentTaskId": 3
           },
@@ -304,7 +304,7 @@
             "title": "设计批次划分策略",
             "description": "设计智能的批次划分和调度策略",
             "details": "设计划分策略：\\n1. 基于音频长度的智能分组\\n2. 考虑内存限制的批次大小\\n3. 负载均衡的任务分配\\n4. 动态批次大小调整\\n5. 优先级队列管理",
-            "status": "pending",
+            "status": "done",
             "dependencies": [],
             "parentTaskId": 3
           }
@@ -314,7 +314,7 @@
         "id": 4,
         "title": "StorageService 核心功能实现",
         "description": "实现 MinIO 存储服务的核心功能模块",
-        "status": "pending",
+        "status": "in-progress",
         "priority": "high",
         "dependencies": [
           1
@@ -327,7 +327,7 @@
             "title": "实现音频文件上传功能",
             "description": "实现 upload_audio_file() 方法",
             "details": "实现文件上传核心逻辑：\\n1. 文件格式验证和转换\\n2. 文件大小限制检查\\n3. 生成唯一文件名\\n4. 上传到 MinIO 存储\\n5. 更新数据库记录\\n6. 返回文件 ID 和元数据",
-            "status": "pending",
+            "status": "in-progress",
             "dependencies": [],
             "parentTaskId": 4
           },
@@ -624,7 +624,7 @@
       "created": "2025-01-27",
       "description": "语音识别服务优化第二版任务列表",
       "lastModified": "2025-01-27",
-      "updated": "2025-09-22T03:07:54.387Z"
+      "updated": "2025-09-22T03:16:09.149Z"
     }
   }
 }
