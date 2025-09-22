@@ -36,6 +36,15 @@ class Settings:
     ASR_MODEL_PATH: str = os.getenv("ASR_MODEL_PATH", "./models/asr/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17")
     SPEAKER_MODEL_PATH: str = os.getenv("SPEAKER_MODEL_PATH", "./models/speaker-recongition/3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k.onnx")
     VAD_MODEL_PATH: str = os.getenv("VAD_MODEL_PATH", "./models/vad/silero_vad.onnx")
+    
+    # VAD 模块配置
+    VAD_THRESHOLD: float = float(os.getenv("VAD_THRESHOLD", "0.5"))
+    VAD_MIN_SILENCE_DURATION: float = float(os.getenv("VAD_MIN_SILENCE_DURATION", "0.25"))
+    VAD_MIN_SPEECH_DURATION: float = float(os.getenv("VAD_MIN_SPEECH_DURATION", "0.25"))
+    VAD_MAX_SPEECH_DURATION: float = float(os.getenv("VAD_MAX_SPEECH_DURATION", "5.0"))
+    VAD_BUFFER_SIZE_SECONDS: float = float(os.getenv("VAD_BUFFER_SIZE_SECONDS", "30.0"))
+    VAD_PROVIDER: str = os.getenv("VAD_PROVIDER", "cpu")
+    VAD_THREADS: int = int(os.getenv("VAD_THREADS", "2"))
     PUNCTUATION_MODEL_PATH: str = os.getenv("PUNCTUATION_MODEL_PATH", "./models/punction/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8")
     
     # FFmpeg配置

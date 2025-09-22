@@ -227,7 +227,7 @@
         "id": 2,
         "title": "VAD 模块重构统一",
         "description": "重构现有 VAD 处理逻辑，实现统一的 VAD 处理器",
-        "status": "pending",
+        "status": "done",
         "priority": "high",
         "dependencies": [],
         "details": "根据 PRD 第3.2节要求实现：\n1. 创建统一的 VADProcessor 类\n2. 实现配置化的 VAD 参数管理\n3. 支持批处理和流式处理模式\n4. 重构现有代码中的所有 VAD 调用点\n5. 优化内存使用和性能",
@@ -238,7 +238,7 @@
             "title": "创建 VADConfig 配置类",
             "description": "实现 VAD 统一配置管理",
             "details": "根据 PRD 3.2.3 实现：\\n1. 定义 VADConfig 数据类\\n2. 实现环境变量读取\\n3. 添加配置验证逻辑\\n4. 实现配置热更新\\n5. 添加配置文档",
-            "status": "pending",
+            "status": "done",
             "dependencies": [],
             "parentTaskId": 2
           },
@@ -247,7 +247,7 @@
             "title": "设计 VADProcessor 基础架构",
             "description": "设计统一的 VAD 处理器架构",
             "details": "设计核心组件：\\n1. ConfigManager - 配置管理器\\n2. ModelLoader - 模型加载器\\n3. SegmentDetector - 段落检测器\\n4. ResultProcessor - 结果处理器\\n5. 定义组件间接口",
-            "status": "pending",
+            "status": "done",
             "dependencies": [],
             "parentTaskId": 2
           },
@@ -256,7 +256,7 @@
             "title": "提取现有 VAD 逻辑",
             "description": "从现有代码中提取和分析 VAD 逻辑",
             "details": "分析现有 VAD 实现：\\n1. 分析 app/core/vad.py 现有逻辑\\n2. 分析 model.py 中的 VAD 调用\\n3. 分析 websocket_manager.py 中的使用\\n4. 识别重复代码和差异\\n5. 设计迁移策略",
-            "status": "pending",
+            "status": "done",
             "dependencies": [],
             "parentTaskId": 2
           },
@@ -265,7 +265,7 @@
             "title": "实现内存优化和性能监控",
             "description": "优化 VAD 处理的内存使用和性能",
             "details": "实现性能优化：\\n1. 实现音频缓冲区复用\\n2. 优化模型加载和卸载\\n3. 添加内存使用监控\\n4. 实现处理时间统计\\n5. 添加性能告警机制",
-            "status": "pending",
+            "status": "done",
             "dependencies": [],
             "parentTaskId": 2
           }
@@ -624,7 +624,7 @@
       "created": "2025-01-27",
       "description": "语音识别服务优化第二版任务列表",
       "lastModified": "2025-01-27",
-      "updated": "2025-09-22T03:01:25.790Z"
+      "updated": "2025-09-22T03:07:54.387Z"
     }
   }
 }
