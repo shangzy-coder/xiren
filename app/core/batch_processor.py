@@ -8,11 +8,12 @@
 import logging
 import time
 import asyncio
+import psutil
+import threading
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import RLock
-import threading
 
 import numpy as np
 
@@ -20,6 +21,127 @@ from app.config import settings
 from app.utils.metrics import MetricsCollector
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ResourceMonitor:
+    """系统资源监控器"""
+    
+    def __init__(self):
+        self._cpu_threshold = 80.0  # CPU使用率阈值
+        self._memory_threshold = 80.0  # 内存使用率阈值
+        self._monitoring_enabled = True
+    
+    def get_cpu_usage(self) -> float:
+        """获取当前CPU使用率"""
+        try:
+            return psutil.cpu_percent(interval=0.1)
+        except Exception as e:
+            logger.warning(f"获取CPU使用率失败: {e}")
+            return 50.0  # 返回保守值
+    
+    def get_memory_usage(self) -> Tuple[float, int, int]:
+        """获取内存使用情况"""
+        try:
+            memory = psutil.virtual_memory()
+            return memory.percent, memory.available, memory.total
+        except Exception as e:
+            logger.warning(f"获取内存使用率失败: {e}")
+            return 50.0, 4 * 1024**3, 8 * 1024**3  # 返回保守值
+    
+    def should_reduce_concurrency(self) -> bool:
+        """检查是否应该降低并发度"""
+        if not self._monitoring_enabled:
+            return False
+        
+        cpu_usage = self.get_cpu_usage()
+        memory_percent, _, _ = self.get_memory_usage()
+        
+        return cpu_usage > self._cpu_threshold or memory_percent > self._memory_threshold
+    
+    def get_optimal_thread_count(self, base_threads: int) -> int:
+        """根据系统资源计算最优线程数"""
+        if not self._monitoring_enabled:
+            return base_threads
+        
+        cpu_usage = self.get_cpu_usage()
+        memory_percent, _, _ = self.get_memory_usage()
+        
+        # 根据CPU和内存使用率调整线程数
+        cpu_factor = max(0.3, 1.0 - (cpu_usage - 50) / 100)
+        memory_factor = max(0.3, 1.0 - (memory_percent - 50) / 100)
+        
+        adjustment_factor = min(cpu_factor, memory_factor)
+        optimal_threads = max(1, int(base_threads * adjustment_factor))
+        
+        if optimal_threads != base_threads:
+            logger.info(f"根据资源使用率调整线程数: {base_threads} -> {optimal_threads} "
+                       f"(CPU: {cpu_usage:.1f}%, 内存: {memory_percent:.1f}%)")
+        
+        return optimal_threads
+
+
+@dataclass
+class ErrorRecoveryManager:
+    """错误恢复和降级管理器"""
+    
+    def __init__(self):
+        self.max_retries = 3
+        self.retry_delay = 1.0  # 秒
+        self.degradation_threshold = 0.5  # 失败率阈值
+        self.failure_history: List[Dict] = []
+        self.degradation_active = False
+    
+    def should_retry(self, attempt: int, exception: Exception) -> bool:
+        """判断是否应该重试"""
+        if attempt >= self.max_retries:
+            return False
+        
+        # 针对不同类型的异常采用不同策略
+        if isinstance(exception, (TimeoutError, asyncio.TimeoutError)):
+            return True
+        elif isinstance(exception, MemoryError):
+            return False  # 内存错误不重试
+        elif isinstance(exception, (ConnectionError, OSError)):
+            return True
+        else:
+            return attempt < 2  # 其他错误最多重试1次
+    
+    def get_retry_delay(self, attempt: int) -> float:
+        """获取重试延迟时间（指数退避）"""
+        return self.retry_delay * (2 ** attempt)
+    
+    def should_degrade(self, failure_rate: float) -> bool:
+        """判断是否应该启用降级处理"""
+        return failure_rate > self.degradation_threshold
+    
+    def record_failure(self, operation: str, exception: Exception):
+        """记录失败信息"""
+        self.failure_history.append({
+            'operation': operation,
+            'exception': str(exception),
+            'timestamp': time.time()
+        })
+        
+        # 保持最近的100个错误记录
+        if len(self.failure_history) > 100:
+            self.failure_history = self.failure_history[-100:]
+    
+    def get_recent_failure_rate(self, window_minutes: int = 5) -> float:
+        """获取最近时间窗口内的失败率"""
+        if not self.failure_history:
+            return 0.0
+        
+        current_time = time.time()
+        window_start = current_time - (window_minutes * 60)
+        
+        recent_failures = [f for f in self.failure_history if f['timestamp'] >= window_start]
+        
+        # 简化计算：假设每个失败对应10次尝试
+        total_attempts = len(self.failure_history) * 10
+        failure_count = len(recent_failures)
+        
+        return failure_count / max(total_attempts, 1)
 
 
 @dataclass
@@ -76,7 +198,11 @@ class BatchProcessingStats:
     batches_created: int = 0
     batches_completed: int = 0
     batches_failed: int = 0
+    batches_retried: int = 0  # 重试的批次数
+    partial_failures: int = 0  # 部分失败的处理数
+    degraded_processing: int = 0  # 降级处理次数
     parallel_efficiency: float = 0.0  # 并行效率
+    error_recovery_success: int = 0  # 错误恢复成功次数
     
     def update_stage1_stats(self, processing_time: float, segments_count: int, batches_count: int):
         """更新阶段1统计"""
@@ -143,6 +269,18 @@ class OptimizedBatchProcessor:
         self.stats = BatchProcessingStats()
         self._lock = RLock()
         
+        # 资源监控器
+        self.resource_monitor = ResourceMonitor()
+        
+        # 错误恢复管理器
+        self.error_recovery = ErrorRecoveryManager()
+        
+        # 专用线程池管理
+        self._asr_thread_pool: Optional[ThreadPoolExecutor] = None
+        self._punctuation_thread_pool: Optional[ThreadPoolExecutor] = None
+        self._speaker_thread_pool: Optional[ThreadPoolExecutor] = None
+        self._thread_pools_initialized = False
+        
         # 性能监控
         self.metrics_collector: Optional[MetricsCollector] = None
         if hasattr(settings, 'ENABLE_METRICS') and settings.ENABLE_METRICS:
@@ -152,6 +290,59 @@ class OptimizedBatchProcessor:
                 logger.warning(f"无法初始化性能监控: {e}")
         
         logger.info(f"优化批次处理器创建完成，配置: {asdict(self.config)}")
+    
+    def _initialize_thread_pools(self):
+        """初始化专用线程池"""
+        if self._thread_pools_initialized:
+            return
+        
+        with self._lock:
+            if self._thread_pools_initialized:
+                return
+            
+            # 根据系统资源动态调整线程池大小
+            base_asr_threads = self.config.max_batch_threads
+            base_post_threads = (self.config.punctuation_threads_per_batch + 
+                               self.config.speaker_threads_per_batch)
+            
+            optimal_asr_threads = self.resource_monitor.get_optimal_thread_count(base_asr_threads)
+            optimal_post_threads = self.resource_monitor.get_optimal_thread_count(base_post_threads)
+            
+            # 创建ASR专用线程池
+            self._asr_thread_pool = ThreadPoolExecutor(
+                max_workers=optimal_asr_threads,
+                thread_name_prefix="asr_batch"
+            )
+            
+            # 创建后处理专用线程池
+            self._post_processing_thread_pool = ThreadPoolExecutor(
+                max_workers=optimal_post_threads,
+                thread_name_prefix="post_processing"
+            )
+            
+            self._thread_pools_initialized = True
+            logger.info(f"线程池初始化完成 - ASR: {optimal_asr_threads} 线程, 后处理: {optimal_post_threads} 线程")
+    
+    def _cleanup_thread_pools(self):
+        """清理线程池资源"""
+        with self._lock:
+            if self._asr_thread_pool:
+                self._asr_thread_pool.shutdown(wait=True)
+                self._asr_thread_pool = None
+            
+            if self._post_processing_thread_pool:
+                self._post_processing_thread_pool.shutdown(wait=True)
+                self._post_processing_thread_pool = None
+            
+            self._thread_pools_initialized = False
+            logger.info("线程池资源已清理")
+    
+    def __del__(self):
+        """析构函数，确保资源清理"""
+        try:
+            self._cleanup_thread_pools()
+        except Exception as e:
+            logger.warning(f"清理线程池资源时出错: {e}")
     
     async def process_segments_optimized(
         self,
@@ -178,7 +369,17 @@ class OptimizedBatchProcessor:
             logger.info("使用传统批次处理（优化处理已禁用）")
             return await self._fallback_processing(segments, enable_punctuation, enable_speaker_id, asr_model, punctuation_processor, speaker_extractor)
         
+        # 初始化线程池
+        self._initialize_thread_pools()
+        
+        # 检查系统资源并调整处理策略
+        if self.resource_monitor.should_reduce_concurrency():
+            logger.warning("系统资源使用率较高，将降低并发处理强度")
+        
         logger.info(f"🚀 开始优化批次处理，共 {len(segments)} 个段落")
+        cpu_usage = self.resource_monitor.get_cpu_usage()
+        memory_percent, memory_available, memory_total = self.resource_monitor.get_memory_usage()
+        logger.info(f"📊 系统资源状态 - CPU: {cpu_usage:.1f}%, 内存: {memory_percent:.1f}% ({memory_available//1024**2}MB 可用)")
         
         try:
             # 准备处理段落
@@ -216,8 +417,17 @@ class OptimizedBatchProcessor:
             
         except Exception as e:
             logger.error(f"优化批次处理失败: {e}")
+            self.error_recovery.record_failure("optimized_batch_processing", e)
             self.stats.batches_failed += 1
+            
+            # 检查是否应该启用降级处理
+            failure_rate = self.error_recovery.get_recent_failure_rate()
+            if self.error_recovery.should_degrade(failure_rate):
+                logger.warning(f"失败率过高 ({failure_rate:.2%})，将启用更保守的降级处理策略")
+                self.stats.degraded_processing += 1
+            
             # 降级到传统处理
+            logger.info("降级到传统批次处理模式")
             return await self._fallback_processing(segments, enable_punctuation, enable_speaker_id, asr_model, punctuation_processor, speaker_extractor)
     
     def _prepare_segments(self, segments: List[Dict[str, Any]]) -> List[ProcessingSegment]:
@@ -256,13 +466,17 @@ class OptimizedBatchProcessor:
         
         logger.info(f"📦 创建 {len(batches)} 个批次，每批 {batch_strategy['batch_size']} 个段落，使用 {batch_strategy['max_workers']} 个线程")
         
+        # 确保线程池已初始化
+        if not self._thread_pools_initialized:
+            self._initialize_thread_pools()
+        
         # 并行处理所有批次
         loop = asyncio.get_event_loop()
         batch_futures = []
         
         for batch_idx, batch in enumerate(batches):
             future = loop.run_in_executor(
-                None,  # 使用默认线程池
+                self._asr_thread_pool,  # 使用专用ASR线程池
                 self._process_asr_batch,
                 batch,
                 batch_idx + 1,
@@ -274,18 +488,33 @@ class OptimizedBatchProcessor:
         # 等待所有批次完成
         batch_results = await asyncio.gather(*batch_futures, return_exceptions=True)
         
-        # 收集结果
+        # 收集结果并处理失败的批次
         all_asr_results = []
         successful_batches = 0
         failed_batches = 0
+        retry_batches = []
         
         for i, result in enumerate(batch_results):
             if isinstance(result, Exception):
                 logger.error(f"ASR批次 {i+1} 处理失败: {result}")
-                failed_batches += 1
+                self.error_recovery.record_failure(f"asr_batch_{i+1}", result)
+                
+                # 检查是否应该重试
+                if self.error_recovery.should_retry(0, result):
+                    retry_batches.append((i, batches[i]))
+                    logger.info(f"将重试ASR批次 {i+1}")
+                else:
+                    failed_batches += 1
             else:
                 all_asr_results.extend(result)
                 successful_batches += 1
+        
+        # 处理需要重试的批次
+        if retry_batches:
+            logger.info(f"开始重试 {len(retry_batches)} 个失败的ASR批次")
+            retry_results = await self._retry_failed_batches(retry_batches, asr_model)
+            all_asr_results.extend(retry_results)
+            self.stats.batches_retried += len(retry_batches)
         
         # 按索引排序结果
         all_asr_results.sort(key=lambda x: x.index)
@@ -297,8 +526,60 @@ class OptimizedBatchProcessor:
         
         return all_asr_results
     
+    async def _retry_failed_batches(
+        self,
+        retry_batches: List[Tuple[int, List[ProcessingSegment]]],
+        asr_model
+    ) -> List[ASRResult]:
+        """重试失败的ASR批次"""
+        retry_results = []
+        
+        for batch_idx, batch_segments in retry_batches:
+            for attempt in range(1, self.error_recovery.max_retries + 1):
+                try:
+                    # 添加重试延迟
+                    if attempt > 1:
+                        delay = self.error_recovery.get_retry_delay(attempt - 1)
+                        await asyncio.sleep(delay)
+                        logger.info(f"重试ASR批次 {batch_idx + 1}，第 {attempt} 次尝试（延迟 {delay:.1f}秒）")
+                    
+                    # 尝试重新处理批次
+                    loop = asyncio.get_event_loop()
+                    result = await loop.run_in_executor(
+                        self._asr_thread_pool,
+                        self._process_asr_batch,
+                        batch_segments,
+                        batch_idx + 1,
+                        1,  # 重试时只有这一个批次
+                        asr_model
+                    )
+                    
+                    retry_results.extend(result)
+                    self.stats.error_recovery_success += 1
+                    logger.info(f"ASR批次 {batch_idx + 1} 重试成功")
+                    break
+                    
+                except Exception as e:
+                    logger.warning(f"ASR批次 {batch_idx + 1} 第 {attempt} 次重试失败: {e}")
+                    self.error_recovery.record_failure(f"asr_batch_{batch_idx + 1}_retry_{attempt}", e)
+                    
+                    if attempt == self.error_recovery.max_retries:
+                        logger.error(f"ASR批次 {batch_idx + 1} 重试次数已用完，放弃处理")
+                        # 为失败的段落创建空结果
+                        for segment in batch_segments:
+                            error_result = ASRResult(
+                                index=segment.index,
+                                text="",
+                                confidence=0.0,
+                                start_time=segment.start_time,
+                                end_time=segment.end_time
+                            )
+                            retry_results.append(error_result)
+        
+        return retry_results
+    
     def _calculate_batch_strategy(self, total_segments: int) -> Dict[str, int]:
-        """计算批次划分策略"""
+        """计算批次划分策略，考虑系统资源约束和错误历史"""
         if total_segments <= 10:
             return {
                 'batch_size': total_segments,
@@ -306,17 +587,40 @@ class OptimizedBatchProcessor:
                 'num_batches': 1
             }
         
-        # 根据配置计算批次大小
+        # 根据系统资源动态调整基础配置
+        base_max_threads = self.config.max_batch_threads
+        optimal_max_threads = self.resource_monitor.get_optimal_thread_count(base_max_threads)
+        
+        # 检查错误历史，如果最近失败率较高，启用保守策略
+        failure_rate = self.error_recovery.get_recent_failure_rate()
+        conservative_mode = self.error_recovery.should_degrade(failure_rate)
+        
+        if conservative_mode:
+            optimal_max_threads = max(1, optimal_max_threads // 2)
+            self.stats.degraded_processing += 1
+            logger.warning(f"检测到高失败率 ({failure_rate:.2%})，启用保守处理模式")
+        
+        # 根据配置和资源约束计算批次大小
         batch_size = max(
             self.config.min_batch_size,
-            min(self.config.max_batch_size, total_segments // self.config.max_batch_threads)
+            min(self.config.max_batch_size, total_segments // optimal_max_threads)
         )
+        
+        # 如果系统资源紧张，增加批次大小以减少并发度
+        if self.resource_monitor.should_reduce_concurrency():
+            batch_size = min(self.config.max_batch_size, batch_size * 2)
+            logger.info(f"系统资源紧张，调整批次大小为: {batch_size}")
+        
+        # 如果是保守模式，进一步增加批次大小
+        if conservative_mode:
+            batch_size = min(self.config.max_batch_size, batch_size * 2)
+            logger.info(f"保守模式下，进一步调整批次大小为: {batch_size}")
         
         # 计算批次数量
         num_batches = (total_segments + batch_size - 1) // batch_size
         
-        # 根据批次数量调整线程数
-        max_workers = min(self.config.max_batch_threads, num_batches)
+        # 根据批次数量和资源约束调整线程数
+        max_workers = min(optimal_max_threads, num_batches)
         
         return {
             'batch_size': batch_size,
@@ -405,53 +709,75 @@ class OptimizedBatchProcessor:
         stage2_start_time = time.time()
         logger.info(f"🎯 阶段2：后处理并行开始，处理 {len(asr_results)} 个结果")
         
-        # 准备并行任务
-        total_workers = self.config.punctuation_threads_per_batch + self.config.speaker_threads_per_batch
+        # 确保线程池已初始化
+        if not self._thread_pools_initialized:
+            self._initialize_thread_pools()
         
-        with ThreadPoolExecutor(max_workers=total_workers) as executor:
-            # 提交标点处理任务
-            punctuation_futures = {}
-            if enable_punctuation and punctuation_processor:
-                for asr_result in asr_results:
-                    if asr_result.text.strip():
-                        future = executor.submit(
-                            self._process_punctuation_single,
-                            asr_result.text,
-                            asr_result.index,
-                            punctuation_processor
-                        )
-                        punctuation_futures[future] = asr_result.index
-            
-            # 提交声纹识别任务
-            speaker_futures = {}
-            if enable_speaker_id and speaker_extractor:
-                for i, segment in enumerate(segments):
+        # 使用专用后处理线程池
+        executor = self._post_processing_thread_pool
+        
+        # 提交标点处理任务
+        punctuation_futures = {}
+        if enable_punctuation and punctuation_processor:
+            for asr_result in asr_results:
+                if asr_result.text.strip():
                     future = executor.submit(
-                        self._process_speaker_single,
-                        segment.audio_samples,
-                        segment.sample_rate,
-                        segment.index,
-                        speaker_extractor
+                        self._process_punctuation_single,
+                        asr_result.text,
+                        asr_result.index,
+                        punctuation_processor
                     )
-                    speaker_futures[future] = segment.index
-            
-            # 收集并行结果
-            punctuation_results = {}
-            speaker_results = {}
-            
-            # 等待标点处理完成
+                    punctuation_futures[future] = asr_result.index
+        
+        # 提交声纹识别任务
+        speaker_futures = {}
+        if enable_speaker_id and speaker_extractor:
+            for i, segment in enumerate(segments):
+                future = executor.submit(
+                    self._process_speaker_single,
+                    segment.audio_samples,
+                    segment.sample_rate,
+                    segment.index,
+                    speaker_extractor
+                )
+                speaker_futures[future] = segment.index
+        
+        # 收集并行结果
+        punctuation_results = {}
+        speaker_results = {}
+        
+        # 等待标点处理完成，增加错误计数和超时处理
+        punctuation_success = 0
+        punctuation_failures = 0
+        
+        try:
             for future in as_completed(punctuation_futures, timeout=self.config.post_processing_timeout):
                 try:
                     punctuated_text, index = future.result()
                     punctuation_results[index] = punctuated_text
+                    punctuation_success += 1
                 except Exception as e:
                     index = punctuation_futures[future]
                     logger.warning(f"标点处理失败 (段落 {index}): {e}")
+                    self.error_recovery.record_failure(f"punctuation_{index}", e)
+                    punctuation_failures += 1
                     # 使用原始文本作为降级方案
                     original_text = next((r.text for r in asr_results if r.index == index), "")
                     punctuation_results[index] = original_text
-            
-            # 等待声纹识别完成
+        except asyncio.TimeoutError:
+            logger.error(f"标点处理超时，已处理: {punctuation_success}，失败: {punctuation_failures}")
+            self.stats.partial_failures += 1
+            # 为超时的任务提供降级结果
+            for future, index in punctuation_futures.items():
+                if index not in punctuation_results:
+                    original_text = next((r.text for r in asr_results if r.index == index), "")
+                    punctuation_results[index] = original_text
+        
+        # 等待声纹识别完成，增加错误计数和超时处理
+        speaker_success = 0
+        speaker_failures = 0
+        
+        try:
             for future in as_completed(speaker_futures, timeout=self.config.post_processing_timeout):
                 try:
                     speaker_info, confidence, index = future.result()
@@ -459,9 +785,22 @@ class OptimizedBatchProcessor:
                         'speaker': speaker_info,
                         'confidence': confidence
                     }
+                    speaker_success += 1
                 except Exception as e:
                     index = speaker_futures[future]
                     logger.warning(f"声纹识别失败 (段落 {index}): {e}")
+                    self.error_recovery.record_failure(f"speaker_id_{index}", e)
+                    speaker_failures += 1
+                    speaker_results[index] = {
+                        'speaker': 'unknown',
+                        'confidence': 0.0
+                    }
+        except asyncio.TimeoutError:
+            logger.error(f"声纹识别超时，已处理: {speaker_success}，失败: {speaker_failures}")
+            self.stats.partial_failures += 1
+            # 为超时的任务提供降级结果
+            for future, index in speaker_futures.items():
+                if index not in speaker_results:
                     speaker_results[index] = {
                         'speaker': 'unknown',
                         'confidence': 0.0

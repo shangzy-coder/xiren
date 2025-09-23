@@ -79,6 +79,7 @@ class Settings:
     MAX_BATCH_SIZE: int = int(os.getenv("MAX_BATCH_SIZE", "100"))  # 最大批次大小
     ASR_THREADS_PER_BATCH: int = int(os.getenv("ASR_THREADS_PER_BATCH", "2"))  # 每个批次的ASR线程数
     PUNCTUATION_THREADS_PER_BATCH: int = int(os.getenv("PUNCTUATION_THREADS_PER_BATCH", "2"))  # 每个批次的标点线程数
+    SPEAKER_THREADS_PER_BATCH: int = int(os.getenv("SPEAKER_THREADS_PER_BATCH", "2"))  # 每个批次的声纹线程数
     
     # 设备配置
     DEVICE_TYPE: str = os.getenv("DEVICE_TYPE", "gpu")  # auto, cpu, gpu

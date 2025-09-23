@@ -1,6 +1,6 @@
 # Task ID: 6
 # Title: VADProcessor 统一接口实现
-# Status: pending
+# Status: done
 # Dependencies: 2
 # Priority: high
 # Description: 实现统一的 VAD 处理器接口和配置管理
@@ -17,19 +17,19 @@
 功能测试验证各接口正确性，性能测试对比原实现
 
 # Subtasks:
-## 1. 实现 detect_speech_segments 方法 [pending]
+## 1. 实现 detect_speech_segments 方法 [done]
 ### Dependencies: None
 ### Description: 实现统一的语音段落检测接口
 ### Details:
 实现核心检测方法：\n1. 音频预处理和格式转换\n2. VAD 模型推理执行\n3. 结果后处理和过滤\n4. 段落边界优化\n5. 返回标准化结果格式
 
-## 2. 实现 process_streaming_audio 方法 [pending]
+## 2. 实现 process_streaming_audio 方法 [done]
 ### Dependencies: None
 ### Description: 实现流式音频 VAD 处理
 ### Details:
 实现流式处理：\n1. 实现音频块缓冲机制\n2. 实现重叠处理策略\n3. 实现实时段落检测\n4. 处理音频流中断情况\n5. 优化延迟和准确性平衡
 
-## 3. 实现动态配置和统计功能 [pending]
+## 3. 实现动态配置和统计功能 [done]
 ### Dependencies: None
 ### Description: 实现 configure() 和 get_stats() 方法
 ### Details:

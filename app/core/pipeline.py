@@ -384,13 +384,13 @@ async def _process_audio_preprocessing(pipeline_id: str, audio_data: bytes, samp
 async def _process_vad(pipeline_id: str, audio_data: np.ndarray, sample_rate: int) -> Dict[str, Any]:
     """VAD语音活动检测任务"""
     try:
-        from app.core.vad import VADProcessor
+        from app.core.vad import get_vad_processor
         
         orchestrator = await get_pipeline_orchestrator()
         pipeline_data = orchestrator._active_pipelines[pipeline_id]
         
-        # VAD处理
-        vad_processor = VADProcessor()
+        # VAD处理 - 使用全局VAD处理器
+        vad_processor = await get_vad_processor()
         segments = await vad_processor.detect_speech_segments(audio_data, sample_rate)
         
         # 提取语音段音频

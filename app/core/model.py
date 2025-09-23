@@ -21,6 +21,7 @@ import numpy as np
 import sherpa_onnx
 
 from app.config import settings
+from app.core.batch_processor import OptimizedBatchProcessor, get_batch_processor
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +42,10 @@ class ASRModelManager:
     def __init__(self):
         self.offline_recognizer: Optional[sherpa_onnx.OfflineRecognizer] = None
         self.online_recognizer: Optional[sherpa_onnx.OnlineRecognizer] = None
-        self.vad: Optional[sherpa_onnx.VoiceActivityDetector] = None
         self.speaker_extractor: Optional[sherpa_onnx.SpeakerEmbeddingExtractor] = None
         self.speaker_manager: Optional[sherpa_onnx.SpeakerEmbeddingManager] = None
         self.punctuation_processor: Optional[sherpa_onnx.OfflinePunctuation] = None
+        self.batch_processor: Optional[OptimizedBatchProcessor] = None
         
         self._is_initialized = False
         self._lock = threading.Lock()
@@ -93,6 +94,9 @@ class ASRModelManager:
                 enable_punctuation
             )
             
+            # 初始化批次处理器
+            self.batch_processor = await get_batch_processor()
+            
             # 保存初始化参数
             self._model_type = model_type
             self._use_gpu = use_gpu
@@ -120,9 +124,7 @@ class ASRModelManager:
         # 1. 加载离线ASR模型
         self._load_offline_asr(model_type, provider)
         
-        # 2. 加载VAD模型
-        if enable_vad:
-            self._load_vad_model(provider)
+        # 2. VAD模型由统一的VADProcessor管理，无需在这里加载
             
         # 3. 加载声纹识别模型
         if enable_speaker_id:
@@ -202,35 +204,6 @@ class ASRModelManager:
             logger.error(f"加载离线ASR模型失败: {e}")
             raise ModelLoadError(f"Failed to load offline ASR model: {e}")
 
-    def _load_vad_model(self, provider: str) -> None:
-        """加载VAD语音活动检测模型"""
-        try:
-            vad_model_path = Path(settings.VAD_MODEL_PATH)
-            
-            if not vad_model_path.exists():
-                raise FileNotFoundError(f"VAD模型文件不存在: {vad_model_path}")
-                
-            # 创建VAD配置
-            config = sherpa_onnx.VadModelConfig()
-            config.silero_vad.model = str(vad_model_path)
-            config.silero_vad.threshold = 0.5
-            config.silero_vad.min_silence_duration = 0.25  # 最小静音时长
-            config.silero_vad.min_speech_duration = 0.25   # 最小语音时长
-            config.silero_vad.max_speech_duration = 5.0    # 最大语音时长
-            config.sample_rate = settings.SAMPLE_RATE
-            config.num_threads = 2
-            config.provider = provider
-            
-            self.vad = sherpa_onnx.VoiceActivityDetector(
-                config, 
-                buffer_size_in_seconds=30
-            )
-            
-            logger.info("VAD模型加载成功")
-            
-        except Exception as e:
-            logger.error(f"加载VAD模型失败: {e}")
-            raise ModelLoadError(f"Failed to load VAD model: {e}")
 
     def _load_speaker_models(self, provider: str) -> None:
         """加载声纹识别模型"""
@@ -352,7 +325,7 @@ class ASRModelManager:
         start_time = time.time()
         
         try:
-            if enable_vad and self.vad is not None:
+            if enable_vad:
                 # 使用VAD分割音频
                 segments = await self._segment_audio_with_vad(audio_samples, sample_rate)
             else:
@@ -364,13 +337,25 @@ class ASRModelManager:
                     'end_time': len(audio_samples) / sample_rate
                 }]
             
-            # 并行批量识别所有段落（包含标点符号处理）
-            results = await self._parallel_recognize_segments(
-                segments,
-                enable_speaker_id,
-                enable_punctuation,  # 在并行处理中直接处理标点符号
-                max_workers=4  # 使用4个线程并行处理
-            )
+            # 使用优化的批次处理器进行二阶段并行处理
+            if self.batch_processor:
+                results = await self.batch_processor.process_segments_optimized(
+                    segments,
+                    enable_punctuation=enable_punctuation,
+                    enable_speaker_id=enable_speaker_id,
+                    asr_model=self,
+                    punctuation_processor=self.punctuation_processor,
+                    speaker_extractor=self.speaker_extractor
+                )
+            else:
+                # 降级到传统批次处理
+                logger.warning("批次处理器未初始化，使用传统处理方式")
+                results = await self._parallel_recognize_segments(
+                    segments,
+                    enable_speaker_id,
+                    enable_punctuation,  # 在并行处理中直接处理标点符号
+                    max_workers=4  # 使用4个线程并行处理
+                )
 
             # 计算处理统计信息
             total_duration = len(audio_samples) / sample_rate
@@ -729,7 +714,7 @@ class ASRModelManager:
             'model_type': getattr(self, '_model_type', 'none'),
             'use_gpu': getattr(self, '_use_gpu', False),
             'asr_loaded': self.offline_recognizer is not None,
-            'vad_loaded': self.vad is not None,
+            'vad_loaded': True,  # VAD由统一的VADProcessor管理
             'speaker_loaded': self.speaker_extractor is not None and self.speaker_manager is not None,
             'punctuation_loaded': self.punctuation_processor is not None,
             'sample_rate': settings.SAMPLE_RATE,
@@ -751,7 +736,6 @@ class ASRModelManager:
         # 清理模型引用
         self.offline_recognizer = None
         self.online_recognizer = None
-        self.vad = None
         self.speaker_extractor = None
         self.speaker_manager = None
         self.punctuation_processor = None

@@ -464,20 +464,57 @@
         "id": 7,
         "title": "现有代码 VAD 调用重构",
         "description": "重构项目中所有使用 VAD 的代码点，统一使用新的 VADProcessor",
-        "status": "pending",
+        "status": "done",
         "priority": "medium",
         "dependencies": [
           6
         ],
         "details": "重构以下模块中的 VAD 调用：\n1. app/core/model.py 中的模型管理器\n2. app/core/pipeline.py 中的流水线编排器  \n3. app/core/websocket_manager.py 中的 WebSocket 处理\n4. 确保所有调用点使用统一接口\n5. 移除重复的 VAD 初始化代码",
         "testStrategy": "回归测试确保重构后功能正常，集成测试验证各模块协作",
-        "subtasks": []
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "重构 model.py 中的 VAD 调用",
+            "description": "将 ASRModelManager 中的VAD相关代码改为使用统一的 VADProcessor 接口",
+            "details": "修改 _segment_audio_with_vad 方法使用新的 VADProcessor",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 7
+          },
+          {
+            "id": 2,
+            "title": "重构 pipeline.py 中的 VAD 调用",
+            "description": "将流水线编排器中的VAD处理改为使用统一的 VADProcessor 接口",
+            "details": "修改 _process_vad 函数使用新的 VADProcessor",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 7
+          },
+          {
+            "id": 3,
+            "title": "移除重复的 VAD 初始化代码",
+            "description": "清理 ASRModelManager 中原有的 VAD 模型加载代码",
+            "details": "删除 _load_vad_model 方法和相关代码，简化初始化流程",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 7
+          },
+          {
+            "id": 4,
+            "title": "更新回归测试",
+            "description": "确保重构后的代码通过现有测试并更新相关测试用例",
+            "details": "运行测试套件，修复任何因重构导致的问题",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 7
+          }
+        ]
       },
       {
         "id": 8,
         "title": "优化批次处理器实现",
         "description": "实现新的 OptimizedBatchProcessor 类，支持二阶段并行处理",
-        "status": "pending",
+        "status": "in-progress",
         "priority": "high",
         "dependencies": [
           3
@@ -670,7 +707,7 @@
       "created": "2025-01-27",
       "description": "语音识别服务优化第二版任务列表",
       "lastModified": "2025-01-27",
-      "updated": "2025-09-22T03:50:46.375Z"
+      "updated": "2025-09-22T03:59:28.848Z"
     }
   }
 }

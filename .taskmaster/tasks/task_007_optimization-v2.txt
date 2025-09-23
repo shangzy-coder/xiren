@@ -14,3 +14,29 @@
 
 # Test Strategy:
 回归测试确保重构后功能正常，集成测试验证各模块协作
+
+# Subtasks:
+## 1. 重构 model.py 中的 VAD 调用 [pending]
+### Dependencies: None
+### Description: 将 ASRModelManager 中的VAD相关代码改为使用统一的 VADProcessor 接口
+### Details:
+修改 _segment_audio_with_vad 方法使用新的 VADProcessor
+
+## 2. 重构 pipeline.py 中的 VAD 调用 [pending]
+### Dependencies: None
+### Description: 将流水线编排器中的VAD处理改为使用统一的 VADProcessor 接口
+### Details:
+修改 _process_vad 函数使用新的 VADProcessor
+
+## 3. 移除重复的 VAD 初始化代码 [pending]
+### Dependencies: None
+### Description: 清理 ASRModelManager 中原有的 VAD 模型加载代码
+### Details:
+删除 _load_vad_model 方法和相关代码，简化初始化流程
+
+## 4. 更新回归测试 [pending]
+### Dependencies: None
+### Description: 确保重构后的代码通过现有测试并更新相关测试用例
+### Details:
+运行测试套件，修复任何因重构导致的问题
+
